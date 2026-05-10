@@ -1,0 +1,9 @@
+# Distribution artefacts produced by scripts/package.sh
+dist/
+
+# Xcode user-specific state
+**/xcuserdata/
+**/*.xcuserstate
+
+# macOS noise
+.DS_Store
