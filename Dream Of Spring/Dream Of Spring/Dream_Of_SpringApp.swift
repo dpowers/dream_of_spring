@@ -15,7 +15,7 @@ struct Dream_Of_SpringApp: App {
 
     private var iconName: String {
         if enforcer.isPaused { return "moon" }
-        if enforcer.nonWhitelistedBlockers.isEmpty { return "moon.zzz" }
+        if enforcer.nonAlwaysAllowedBlockers.isEmpty { return "moon.zzz" }
         return "moon.zzz.fill"
     }
 }

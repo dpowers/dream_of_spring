@@ -3,7 +3,10 @@ import Foundation
 nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     var idleSeconds: TimeInterval
     var configuredTimeoutSeconds: TimeInterval
-    var nonWhitelistedBlockerCount: Int
+    /// True when at least one blocker is active *given current idle time and
+    /// each blocker's whitelist policy* — i.e. its effective exemption window
+    /// has elapsed. Pre-computed by the enforcer so the decider stays pure.
+    var hasActiveBlocker: Bool
     var secondsSinceLastSleepAttempt: TimeInterval
     var isPaused: Bool
 }
@@ -23,7 +26,7 @@ nonisolated enum Decider {
     static func decide(_ s: EnforcerSnapshot) -> EnforcerAction {
         if s.isPaused { return .doNothing }
         if s.configuredTimeoutSeconds == 0 { return .doNothing }
-        if s.nonWhitelistedBlockerCount == 0 { return .doNothing }
+        if !s.hasActiveBlocker { return .doNothing }
         if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
         if s.idleSeconds < s.configuredTimeoutSeconds + graceSeconds { return .doNothing }
         return .requestSleep

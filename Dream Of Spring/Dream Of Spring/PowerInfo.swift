@@ -4,7 +4,7 @@ import IOKit.pwr_mgt
 import IOKit.ps
 import AppKit
 
-enum AppIdentifier: Hashable, Codable, Sendable {
+nonisolated enum AppIdentifier: Hashable, Codable, Sendable {
     case bundleID(String)
     case processName(String)
 }

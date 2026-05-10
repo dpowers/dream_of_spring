@@ -38,8 +38,29 @@ final class SleepEnforcer {
         }
     }
 
-    var nonWhitelistedBlockers: [Blocker] {
-        blockers.filter { !whitelist.contains($0.identifier) }
+    /// Blockers whose whitelist policy doesn't (yet) exempt them given the
+    /// current idle time. Drives both the decision logic and the menu's
+    /// "Status" line.
+    var activeBlockers: [Blocker] {
+        blockers.filter { isActive(blocker: $0) }
+    }
+
+    /// Blockers without an `.alwaysAllow` entry — including any `.allowUpTo`
+    /// blockers whose grace window hasn't elapsed yet. Used by the status
+    /// icon, where "active right now" is too narrow.
+    var nonAlwaysAllowedBlockers: [Blocker] {
+        blockers.filter { whitelist.policy(for: $0.identifier) != .alwaysAllow }
+    }
+
+    private func isActive(blocker: Blocker) -> Bool {
+        switch whitelist.policy(for: blocker.identifier) {
+        case nil:
+            return idleSeconds >= configuredTimeoutSeconds
+        case .alwaysAllow:
+            return false
+        case .allowUpTo(let seconds):
+            return idleSeconds >= max(configuredTimeoutSeconds, seconds)
+        }
     }
 
     func pause(for duration: TimeInterval?) {
@@ -69,16 +90,17 @@ final class SleepEnforcer {
         powerSource = PowerInfo.activePowerSourceKey()
         blockers = PowerInfo.blockingAssertions()
 
+        let active = activeBlockers
         let snapshot = EnforcerSnapshot(
             idleSeconds: idleSeconds,
             configuredTimeoutSeconds: configuredTimeoutSeconds,
-            nonWhitelistedBlockerCount: nonWhitelistedBlockers.count,
+            hasActiveBlocker: !active.isEmpty,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
             isPaused: isPaused
         )
         lastDecision = Decider.decide(snapshot)
         if lastDecision == .requestSleep {
-            Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s blockers=\(snapshot.nonWhitelistedBlockerCount, privacy: .public)")
+            Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s active-blockers=\(active.count, privacy: .public)")
             requestSleep()
             lastSleepAttemptAt = Date()
         }

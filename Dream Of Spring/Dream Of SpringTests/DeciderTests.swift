@@ -7,20 +7,20 @@ struct DeciderTests {
     private func snapshot(
         idle: TimeInterval = 700,
         timeout: TimeInterval = 600,
-        blockers: Int = 1,
+        hasActiveBlocker: Bool = true,
         sinceLastAttempt: TimeInterval = 9_999,
         paused: Bool = false
     ) -> EnforcerSnapshot {
         EnforcerSnapshot(
             idleSeconds: idle,
             configuredTimeoutSeconds: timeout,
-            nonWhitelistedBlockerCount: blockers,
+            hasActiveBlocker: hasActiveBlocker,
             secondsSinceLastSleepAttempt: sinceLastAttempt,
             isPaused: paused
         )
     }
 
-    @Test func pastTimeoutWithBlockersFires() {
+    @Test func pastTimeoutWithActiveBlockerFires() {
         #expect(Decider.decide(snapshot()) == .requestSleep)
     }
 
@@ -32,19 +32,11 @@ struct DeciderTests {
         #expect(Decider.decide(snapshot(timeout: 0)) == .doNothing)
     }
 
-    @Test func noBlockersDoesNothing() {
-        #expect(Decider.decide(snapshot(blockers: 0)) == .doNothing)
-    }
-
-    /// All blockers being whitelisted reduces the count to zero before the
-    /// snapshot is built, so the decider should be a no-op.
-    @Test func allWhitelistedDoesNothing() {
-        #expect(Decider.decide(snapshot(blockers: 0)) == .doNothing)
-    }
-
-    /// At least one non-whitelisted blocker remains → fire.
-    @Test func mixedWhitelistFires() {
-        #expect(Decider.decide(snapshot(blockers: 1)) == .requestSleep)
+    /// No active blocker covers both "nothing is blocking" and "all blockers
+    /// are exempt under their whitelist policies". The enforcer collapses
+    /// both cases to the same snapshot field.
+    @Test func noActiveBlockerDoesNothing() {
+        #expect(Decider.decide(snapshot(hasActiveBlocker: false)) == .doNothing)
     }
 
     @Test func cooldownSuppresses() {
@@ -61,5 +53,25 @@ struct DeciderTests {
 
     @Test func idleZeroDoesNothing() {
         #expect(Decider.decide(snapshot(idle: 0, timeout: 600)) == .doNothing)
+    }
+}
+
+@Suite("WhitelistPolicy.effectiveThreshold")
+struct WhitelistPolicyTests {
+    @Test func alwaysAllowIsInfinity() {
+        #expect(WhitelistPolicy.alwaysAllow.effectiveThreshold(configuredTimeout: 60) == .infinity)
+    }
+
+    @Test func allowUpToReturnsItsAbsoluteValueWhenLargerThanTimeout() {
+        let t = WhitelistPolicy.allowUpTo(seconds: 1800).effectiveThreshold(configuredTimeout: 60)
+        #expect(t == 1800)
+    }
+
+    /// If the user picks an extension shorter than the system timer, we clamp
+    /// up — there's no sensible reading where the per-app threshold should
+    /// fire earlier than the OS would have on its own.
+    @Test func allowUpToClampsToTimeout() {
+        let t = WhitelistPolicy.allowUpTo(seconds: 30).effectiveThreshold(configuredTimeout: 600)
+        #expect(t == 600)
     }
 }

@@ -17,13 +17,11 @@ struct MenuContent: View {
         } else {
             Text("Blocking sleep:")
             ForEach(enforcer.blockers) { blocker in
-                let whitelisted = enforcer.whitelist.contains(blocker.identifier)
-                Button("\(whitelisted ? "○" : "•")  \(blocker.displayName) — \(blocker.reason)") {
-                    enforcer.whitelist.toggle(blocker.identifier)
-                }
-                .help(whitelisted
-                      ? "Whitelisted — click to start enforcing again"
-                      : "Click to whitelist this app (allow it to keep the Mac awake)")
+                BlockerPolicyMenu(
+                    whitelist: enforcer.whitelist,
+                    identifier: blocker.identifier,
+                    label: "\(marker(for: enforcer.whitelist.policy(for: blocker.identifier)))  \(blocker.displayName) — \(blocker.reason)"
+                )
             }
         }
 
@@ -41,16 +39,18 @@ struct MenuContent: View {
         }
 
         Menu("Whitelist") {
-            if enforcer.whitelist.entries.isEmpty {
+            if enforcer.whitelist.policies.isEmpty {
                 Text("No apps whitelisted")
             } else {
-                let sorted = enforcer.whitelist.entries.sorted {
+                let sorted = enforcer.whitelist.policies.keys.sorted {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
                 ForEach(sorted, id: \.self) { id in
-                    Button("Remove \(id.displayName)") {
-                        enforcer.whitelist.remove(id)
-                    }
+                    BlockerPolicyMenu(
+                        whitelist: enforcer.whitelist,
+                        identifier: id,
+                        label: "\(marker(for: enforcer.whitelist.policy(for: id)))  \(id.displayName) \(policySuffix(for: enforcer.whitelist.policy(for: id)))"
+                    )
                 }
             }
             Divider()
@@ -96,11 +96,17 @@ struct MenuContent: View {
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"
         }
-        let active = enforcer.nonWhitelistedBlockers.count
-        if active == 0 {
+        let pendingThresholds = enforcer.blockers.compactMap { blocker -> TimeInterval? in
+            switch enforcer.whitelist.policy(for: blocker.identifier) {
+            case .alwaysAllow: return nil
+            case .allowUpTo(let s): return max(enforcer.configuredTimeoutSeconds, s)
+            case nil: return enforcer.configuredTimeoutSeconds
+            }
+        }
+        guard let earliest = pendingThresholds.min() else {
             return "Status: idle (system will sleep on its own)"
         }
-        let remaining = enforcer.configuredTimeoutSeconds + Decider.graceSeconds - enforcer.idleSeconds
+        let remaining = earliest + Decider.graceSeconds - enforcer.idleSeconds
         if remaining > 0 {
             return "Status: would force sleep in \(format(seconds: remaining))"
         }
@@ -114,6 +120,22 @@ struct MenuContent: View {
         let s = total % 60
         if s == 0 { return "\(m) min" }
         return "\(m) min \(s) s"
+    }
+
+    private func marker(for policy: WhitelistPolicy?) -> String {
+        switch policy {
+        case nil: return "•"             // counts as full blocker
+        case .alwaysAllow: return "○"     // never counts
+        case .allowUpTo: return "◐"        // counts after grace
+        }
+    }
+
+    private func policySuffix(for policy: WhitelistPolicy?) -> String {
+        switch policy {
+        case .allowUpTo(let s): return "(allow up to \(format(seconds: s)))"
+        case .alwaysAllow: return "(always allow)"
+        case nil: return ""
+        }
     }
 
     private func addAppToWhitelistFromPicker() {
@@ -134,6 +156,35 @@ struct MenuContent: View {
         } else {
             identifier = .processName(url.deletingPathExtension().lastPathComponent)
         }
-        enforcer.whitelist.add(identifier)
+        enforcer.whitelist.add(identifier, policy: .alwaysAllow)
     }
+}
+
+private struct BlockerPolicyMenu: View {
+    let whitelist: Whitelist
+    let identifier: AppIdentifier
+    let label: String
+
+    var body: some View {
+        Menu {
+            let current = whitelist.policy(for: identifier)
+            Button(check(current == nil) + "Don't whitelist") {
+                whitelist.remove(identifier)
+            }
+            Button(check(current == .alwaysAllow) + "Always allow") {
+                whitelist.setPolicy(.alwaysAllow, for: identifier)
+            }
+            Divider()
+            ForEach(WhitelistPreset.allowUpToOptions, id: \.label) { preset in
+                let isSelected = current == .allowUpTo(seconds: preset.seconds)
+                Button(check(isSelected) + "Allow up to \(preset.label)") {
+                    whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier)
+                }
+            }
+        } label: {
+            Text(label)
+        }
+    }
+
+    private func check(_ on: Bool) -> String { on ? "✓ " : "   " }
 }
