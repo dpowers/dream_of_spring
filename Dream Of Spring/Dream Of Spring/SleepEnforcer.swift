@@ -53,14 +53,10 @@ final class SleepEnforcer {
     }
 
     private func isActive(blocker: Blocker) -> Bool {
-        switch whitelist.policy(for: blocker.identifier) {
-        case nil:
-            return idleSeconds >= configuredTimeoutSeconds
-        case .alwaysAllow:
-            return false
-        case .allowUpTo(let seconds):
-            return idleSeconds >= max(configuredTimeoutSeconds, seconds)
-        }
+        idleSeconds >= whitelist.effectiveThreshold(
+            for: blocker.identifier,
+            configuredTimeout: configuredTimeoutSeconds
+        )
     }
 
     func pause(for duration: TimeInterval?) {

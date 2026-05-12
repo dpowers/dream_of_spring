@@ -42,14 +42,18 @@ struct MenuContent: View {
             if enforcer.whitelist.policies.isEmpty {
                 Text("No apps whitelisted")
             } else {
-                let sorted = enforcer.whitelist.policies.keys.sorted {
-                    $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-                }
-                ForEach(sorted, id: \.self) { id in
+                // Resolve displayName once per id; `displayName` does a linear
+                // scan of running applications, so doing it inside a sort
+                // comparator would be O(N log N) scans.
+                let sorted = enforcer.whitelist.policies.keys
+                    .map { (id: $0, name: $0.displayName) }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                ForEach(sorted, id: \.id) { entry in
+                    let policy = enforcer.whitelist.policy(for: entry.id)
                     BlockerPolicyMenu(
                         whitelist: enforcer.whitelist,
-                        identifier: id,
-                        label: "\(marker(for: enforcer.whitelist.policy(for: id)))  \(id.displayName) \(policySuffix(for: enforcer.whitelist.policy(for: id)))"
+                        identifier: entry.id,
+                        label: "\(marker(for: policy))  \(entry.name) \(policySuffix(for: policy))"
                     )
                 }
             }
@@ -96,13 +100,14 @@ struct MenuContent: View {
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"
         }
-        let pendingThresholds = enforcer.blockers.compactMap { blocker -> TimeInterval? in
-            switch enforcer.whitelist.policy(for: blocker.identifier) {
-            case .alwaysAllow: return nil
-            case .allowUpTo(let s): return max(enforcer.configuredTimeoutSeconds, s)
-            case nil: return enforcer.configuredTimeoutSeconds
+        let pendingThresholds = enforcer.blockers
+            .map {
+                enforcer.whitelist.effectiveThreshold(
+                    for: $0.identifier,
+                    configuredTimeout: enforcer.configuredTimeoutSeconds
+                )
             }
-        }
+            .filter { $0.isFinite }
         guard let earliest = pendingThresholds.min() else {
             return "Status: idle (system will sleep on its own)"
         }
@@ -124,9 +129,9 @@ struct MenuContent: View {
 
     private func marker(for policy: WhitelistPolicy?) -> String {
         switch policy {
-        case nil: return "•"             // counts as full blocker
-        case .alwaysAllow: return "○"     // never counts
-        case .allowUpTo: return "◐"        // counts after grace
+        case nil: return "•"
+        case .alwaysAllow: return "○"
+        case .allowUpTo: return "◐"
         }
     }
 
@@ -156,7 +161,7 @@ struct MenuContent: View {
         } else {
             identifier = .processName(url.deletingPathExtension().lastPathComponent)
         }
-        enforcer.whitelist.add(identifier, policy: .alwaysAllow)
+        enforcer.whitelist.setPolicy(.alwaysAllow, for: identifier)
     }
 }
 

@@ -56,21 +56,12 @@ final class Whitelist {
 
     func policy(for id: AppIdentifier) -> WhitelistPolicy? { policies[id] }
 
-    /// Add (with `.alwaysAllow`) if absent, remove if present. Used by the
-    /// inline blocker toggle for the binary "is this whitelisted at all" case.
-    func toggle(_ id: AppIdentifier) {
-        if policies[id] == nil {
-            policies[id] = .alwaysAllow
-        } else {
-            policies.removeValue(forKey: id)
-        }
-        save()
-    }
-
-    func add(_ id: AppIdentifier, policy: WhitelistPolicy = .alwaysAllow) {
-        guard policies[id] != policy else { return }
-        policies[id] = policy
-        save()
+    /// Idle-time threshold past which an app with this identifier's policy
+    /// stops being exempt and counts as an active blocker. `nil` (no entry)
+    /// returns `configuredTimeout`; `.alwaysAllow` returns `.infinity`.
+    func effectiveThreshold(for id: AppIdentifier, configuredTimeout: TimeInterval) -> TimeInterval {
+        guard let p = policies[id] else { return configuredTimeout }
+        return p.effectiveThreshold(configuredTimeout: configuredTimeout)
     }
 
     func setPolicy(_ policy: WhitelistPolicy, for id: AppIdentifier) {
