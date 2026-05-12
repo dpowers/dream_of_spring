@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 nonisolated enum WhitelistPolicy: Hashable, Codable, Sendable {
     /// Never force sleep on account of this app.
@@ -40,6 +41,8 @@ nonisolated struct WhitelistEntry: Hashable, Codable, Sendable {
 @MainActor
 @Observable
 final class Whitelist {
+    private static let logger = Logger(subsystem: "art.gardenplanner.dream-of-spring", category: "whitelist")
+
     private(set) var policies: [AppIdentifier: WhitelistPolicy] = [:]
 
     private static let policiesKey = "whitelistPolicies"
@@ -78,24 +81,35 @@ final class Whitelist {
         let entries = policies
             .map { WhitelistEntry(id: $0.key, policy: $0.value) }
             .sorted { $0.id.sortKey < $1.id.sortKey }
-        if let data = try? JSONEncoder().encode(entries) {
+        do {
+            let data = try JSONEncoder().encode(entries)
             defaults.set(data, forKey: Self.policiesKey)
+        } catch {
+            Self.logger.error("Failed to encode whitelist (\(entries.count, privacy: .public) entries): \(error.localizedDescription, privacy: .public)")
         }
     }
 
     private func load() {
-        if let data = defaults.data(forKey: Self.policiesKey),
-           let entries = try? JSONDecoder().decode([WhitelistEntry].self, from: data) {
-            policies = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.policy) })
-            return
+        if let data = defaults.data(forKey: Self.policiesKey) {
+            do {
+                let entries = try JSONDecoder().decode([WhitelistEntry].self, from: data)
+                policies = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.policy) })
+                return
+            } catch {
+                Self.logger.error("Failed to decode whitelist: \(error.localizedDescription, privacy: .public)")
+            }
         }
         // Migrate from the pre-policy `Set<AppIdentifier>` shape: every old
         // entry becomes `.alwaysAllow`, matching its prior behavior.
-        if let data = defaults.data(forKey: Self.legacyKey),
-           let legacy = try? JSONDecoder().decode([AppIdentifier].self, from: data) {
+        guard let data = defaults.data(forKey: Self.legacyKey) else { return }
+        do {
+            let legacy = try JSONDecoder().decode([AppIdentifier].self, from: data)
             policies = Dictionary(uniqueKeysWithValues: legacy.map { ($0, .alwaysAllow) })
             save()
             defaults.removeObject(forKey: Self.legacyKey)
+            Self.logger.info("Migrated \(legacy.count, privacy: .public) entries from legacy whitelist format")
+        } catch {
+            Self.logger.error("Failed to decode legacy whitelist: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

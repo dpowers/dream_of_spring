@@ -90,6 +90,9 @@ struct MenuContent: View {
     }
 
     private var statusLine: String {
+        if enforcer.lastActuatorFailed {
+            return "Status: ⚠ last sleep attempt failed (see Console.app)"
+        }
         if enforcer.isPaused {
             if let until = enforcer.pausedUntil {
                 let remaining = max(0, until.timeIntervalSinceNow)

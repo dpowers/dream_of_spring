@@ -3,6 +3,7 @@ import IOKit
 import IOKit.pwr_mgt
 import IOKit.ps
 import AppKit
+import os
 
 nonisolated enum AppIdentifier: Hashable, Codable, Sendable {
     case bundleID(String)
@@ -46,6 +47,8 @@ struct Blocker: Identifiable, Hashable, Sendable {
 }
 
 enum PowerInfo {
+    private static let logger = Logger(subsystem: "art.gardenplanner.dream-of-spring", category: "power-info")
+
     private static let assertionTypeKey = "AssertType"
     private static let assertionLevelKey = "AssertLevel"
     private static let assertionNameKey = "AssertName"
@@ -75,22 +78,28 @@ enum PowerInfo {
         return TimeInterval(nanoseconds) / 1_000_000_000
     }
 
-    /// Reads the currently-active system-sleep timer in seconds.
-    /// Returns 0 if the user has selected "Never".
+    /// Reads the currently-active system-sleep timer in seconds. Returns 0 if
+    /// the user explicitly chose "Never", and `nil` if reading failed — the
+    /// caller should treat `nil` as "preserve last known value" rather than
+    /// silently collapsing into the "Never" path (which would disable the
+    /// enforcer entirely).
+    ///
     /// Implementation note: `IOPMCopyPMPreferences` isn't surfaced in the Swift
     /// IOKit module on macOS 26, so we shell out to `pmset -g`, which already
     /// resolves to the active power source for us.
-    static func activeSystemSleepTimeoutSeconds() -> TimeInterval {
-        guard let output = runPMSet(arguments: ["-g"]) else { return 0 }
+    static func activeSystemSleepTimeoutSeconds() -> TimeInterval? {
+        guard let output = runPMSet(arguments: ["-g"]) else { return nil }
         for rawLine in output.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            // "sleep                1 (sleep prevented by …)"
-            guard line.hasPrefix("sleep") else { continue }
+            // "sleep                1 (sleep prevented by …)". The trailing
+            // space matters — it disambiguates from any future `sleepXxx` key.
+            guard line.hasPrefix("sleep ") else { continue }
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)
             guard parts.count >= 2, parts[0] == "sleep", let minutes = Int(parts[1]) else { continue }
             return TimeInterval(minutes) * 60
         }
-        return 0
+        logger.error("pmset -g output did not contain a 'sleep' line")
+        return nil
     }
 
     private static func runPMSet(arguments: [String]) -> String? {
@@ -100,8 +109,17 @@ enum PowerInfo {
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()
-        do { try task.run() } catch { return nil }
+        do {
+            try task.run()
+        } catch {
+            logger.error("Failed to launch pmset: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
         task.waitUntilExit()
+        if task.terminationStatus != 0 {
+            logger.error("pmset exited \(task.terminationStatus, privacy: .public)")
+            return nil
+        }
         guard let data = try? pipe.fileHandleForReading.readToEnd() else { return nil }
         return String(data: data, encoding: .utf8)
     }

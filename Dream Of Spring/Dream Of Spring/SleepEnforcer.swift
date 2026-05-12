@@ -13,18 +13,23 @@ final class SleepEnforcer {
     private(set) var blockers: [Blocker] = []
     private(set) var lastDecision: EnforcerAction = .doNothing
     private(set) var lastSleepAttemptAt: Date?
+    /// `true` if the most recent actuator call failed. Cleared on success or
+    /// when no attempt has been made yet. Surfaced in the menu so a stuck
+    /// actuator isn't silently looping every cooldown interval.
+    private(set) var lastActuatorFailed: Bool = false
     private(set) var isPaused: Bool = false
     private(set) var pausedUntil: Date?
 
     let whitelist: Whitelist
-    private let requestSleep: @MainActor () -> Void
+    private let requestSleep: @MainActor () -> Bool
 
     private static let pollInterval: Duration = .seconds(30)
 
     init(
         whitelist: Whitelist? = nil,
-        requestSleep: @MainActor @escaping () -> Void = {
+        requestSleep: @MainActor @escaping () -> Bool = {
             print("[Dream Of Spring] would call IOPMSleepSystem now")
+            return true
         }
     ) {
         self.whitelist = whitelist ?? Whitelist()
@@ -82,7 +87,11 @@ final class SleepEnforcer {
         }
 
         idleSeconds = PowerInfo.userIdleSeconds()
-        configuredTimeoutSeconds = PowerInfo.activeSystemSleepTimeoutSeconds()
+        if let t = PowerInfo.activeSystemSleepTimeoutSeconds() {
+            configuredTimeoutSeconds = t
+        }
+        // pmset failure: keep the last known timeout rather than collapsing to
+        // 0, which the decider would interpret as the user choosing "Never".
         powerSource = PowerInfo.activePowerSourceKey()
         blockers = PowerInfo.blockingAssertions()
 
@@ -97,7 +106,7 @@ final class SleepEnforcer {
         lastDecision = Decider.decide(snapshot)
         if lastDecision == .requestSleep {
             Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s active-blockers=\(active.count, privacy: .public)")
-            requestSleep()
+            lastActuatorFailed = !requestSleep()
             lastSleepAttemptAt = Date()
         }
     }
