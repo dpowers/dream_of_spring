@@ -108,6 +108,11 @@ final class SleepEnforcer {
             Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s active-blockers=\(active.count, privacy: .public)")
             lastActuatorFailed = !requestSleep()
             lastSleepAttemptAt = Date()
+        } else if active.isEmpty {
+            // Nothing is keeping the Mac awake any more (user returned, or the
+            // blocker released its assertion), so a prior failure is stale —
+            // clear it rather than showing the warning until the next attempt.
+            lastActuatorFailed = false
         }
     }
 

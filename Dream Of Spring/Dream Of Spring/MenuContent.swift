@@ -90,9 +90,8 @@ struct MenuContent: View {
     }
 
     private var statusLine: String {
-        if enforcer.lastActuatorFailed {
-            return "Status: ⚠ last sleep attempt failed (see Console.app)"
-        }
+        // Paused / dormant are the truthful state when the enforcer isn't
+        // acting, so they take priority over a (possibly stale) failure flag.
         if enforcer.isPaused {
             if let until = enforcer.pausedUntil {
                 let remaining = max(0, until.timeIntervalSinceNow)
@@ -102,6 +101,9 @@ struct MenuContent: View {
         }
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"
+        }
+        if enforcer.lastActuatorFailed {
+            return "Status: ⚠ last sleep attempt failed (see Console.app)"
         }
         let pendingThresholds = enforcer.blockers
             .map {
