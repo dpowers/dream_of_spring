@@ -67,6 +67,11 @@ open "$(xcodebuild -project 'Dream Of Spring.xcodeproj' -scheme 'Dream Of Spring
 - **App Sandbox:** **OFF** (`ENABLE_APP_SANDBOX = NO`). Required so `IOPMSleepSystem` can open an IOKit user-client to `IOPMrootDomain`. Do not re-enable without first introducing a privileged helper.
 - **`LSUIElement`:** ON via `INFOPLIST_KEY_LSUIElement = YES` — no Dock icon, no app menu, menu-bar only.
 - **Hardened Runtime:** ON
+- **Versioning:** calver — `CFBundleShortVersionString` / `CFBundleVersion`
+  are overwritten with the build date (`YYYY-MM-DD`) by the "Stamp version
+  with build date" run-script phase (runs every build; the
+  `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` build settings are unused
+  placeholders). The menu shows it as "Version …" above Quit.
 - **Tests:** unit target uses Swift Testing (`#expect`, `@Test`); UI target uses XCTest. Run with `xcodebuild … test -only-testing:"Dream Of SpringTests"` to skip the slower UI tests.
 - **Logging subsystem:** `art.gardenplanner.dream-of-spring`. Stream with `log stream --predicate 'subsystem == "art.gardenplanner.dream-of-spring"'`.
 

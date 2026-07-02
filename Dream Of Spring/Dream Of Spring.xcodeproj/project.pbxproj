@@ -102,6 +102,7 @@
 				37B98A882FB00EDD00EEBF15 /* Sources */,
 				37B98A892FB00EDD00EEBF15 /* Frameworks */,
 				37B98A8A2FB00EDD00EEBF15 /* Resources */,
+				DA7EB01D2E0000010000CAFE /* Stamp version with build date */,
 			);
 			buildRules = (
 			);
@@ -230,6 +231,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DA7EB01D2E0000010000CAFE /* Stamp version with build date */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Stamp version with build date";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+				"$(DERIVED_FILE_DIR)/version-stamp.marker",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Version = build date, canonical YYYY-MM-DD (calver). The Info.plist is\n# declared as both input and output so Xcode treats this as an in-place\n# mutation ordered after plist generation and before code signing; the\n# marker is the non-mutable output node the build system requires.\nBUILD_DATE=$(date +%Y-%m-%d)\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString ${BUILD_DATE}\" \"${PLIST}\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :CFBundleShortVersionString string ${BUILD_DATE}\" \"${PLIST}\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion ${BUILD_DATE}\" \"${PLIST}\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :CFBundleVersion string ${BUILD_DATE}\" \"${PLIST}\"\necho \"${BUILD_DATE}\" > \"${DERIVED_FILE_DIR}/version-stamp.marker\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		37B98A882FB00EDD00EEBF15 /* Sources */ = {

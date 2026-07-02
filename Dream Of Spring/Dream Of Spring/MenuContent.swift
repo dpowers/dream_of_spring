@@ -75,6 +75,7 @@ struct MenuContent: View {
         }
 
         Divider()
+        Text("Version \(appVersion)")
         Button("Quit Dream Of Spring") {
             NSApplication.shared.terminate(nil)
         }
@@ -125,6 +126,12 @@ struct MenuContent: View {
             return "Status: would force sleep in \(format(seconds: remaining))"
         }
         return "Status: forcing sleep"
+    }
+
+    /// Stamped with the build date (YYYY-MM-DD) by the "Stamp version with
+    /// build date" run-script phase.
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
     private var captureDescription: String {
