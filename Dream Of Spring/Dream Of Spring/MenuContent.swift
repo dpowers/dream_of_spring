@@ -90,8 +90,9 @@ struct MenuContent: View {
     }
 
     private var statusLine: String {
-        // Paused / dormant are the truthful state when the enforcer isn't
-        // acting, so they take priority over a (possibly stale) failure flag.
+        // Paused / dormant / on-a-call are the truthful state when the
+        // enforcer isn't acting, so they take priority over a (possibly
+        // stale) failure flag.
         if enforcer.isPaused {
             if let until = enforcer.pausedUntil {
                 let remaining = max(0, until.timeIntervalSinceNow)
@@ -101,6 +102,9 @@ struct MenuContent: View {
         }
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"
+        }
+        if enforcer.cameraInUse || enforcer.microphoneInUse {
+            return "Status: \(captureDescription) in use — won't force sleep"
         }
         if enforcer.lastActuatorFailed {
             return "Status: ⚠ last sleep attempt failed (see Console.app)"
@@ -121,6 +125,14 @@ struct MenuContent: View {
             return "Status: would force sleep in \(format(seconds: remaining))"
         }
         return "Status: forcing sleep"
+    }
+
+    private var captureDescription: String {
+        switch (enforcer.cameraInUse, enforcer.microphoneInUse) {
+        case (true, true): return "camera & microphone"
+        case (true, false): return "camera"
+        default: return "microphone"
+        }
     }
 
     private func format(seconds: TimeInterval) -> String {

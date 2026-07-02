@@ -8,6 +8,7 @@ struct DeciderTests {
         idle: TimeInterval = 700,
         timeout: TimeInterval = 600,
         hasActiveBlocker: Bool = true,
+        captureActive: Bool = false,
         sinceLastAttempt: TimeInterval = 9_999,
         paused: Bool = false
     ) -> EnforcerSnapshot {
@@ -15,6 +16,7 @@ struct DeciderTests {
             idleSeconds: idle,
             configuredTimeoutSeconds: timeout,
             hasActiveBlocker: hasActiveBlocker,
+            isCaptureActive: captureActive,
             secondsSinceLastSleepAttempt: sinceLastAttempt,
             isPaused: paused
         )
@@ -37,6 +39,14 @@ struct DeciderTests {
     /// both cases to the same snapshot field.
     @Test func noActiveBlockerDoesNothing() {
         #expect(Decider.decide(snapshot(hasActiveBlocker: false)) == .doNothing)
+    }
+
+    /// A live camera or microphone anywhere on the system vetoes enforcement
+    /// even with a non-exempt blocker active past the grace window — forcing
+    /// sleep would kill the call, and call apps' real keep-awake assertions
+    /// are daemon-held, so no whitelist entry could protect them.
+    @Test func captureActiveVetoes() {
+        #expect(Decider.decide(snapshot(captureActive: true)) == .doNothing)
     }
 
     @Test func cooldownSuppresses() {

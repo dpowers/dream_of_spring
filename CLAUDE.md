@@ -28,6 +28,7 @@ dream_of_spring/                          ← repo root (this file)
     │   ├── Dream_Of_SpringApp.swift      ← @main, MenuBarExtra scene, dynamic icon
     │   ├── SleepEnforcer.swift           ← @Observable; 30s poll loop, decision + actuation
     │   ├── PowerInfo.swift               ← IOKit reads (idle, assertions) + pmset shell-out
+    │   ├── CaptureActivity.swift         ← camera/mic in-use reads (CoreMediaIO + CoreAudio)
     │   ├── SleepActuator.swift           ← IOPMSleepSystem wrapper
     │   ├── Decider.swift                 ← pure: snapshot → action (unit-tested)
     │   ├── Whitelist.swift               ← UserDefaults-backed Set<AppIdentifier>
@@ -78,6 +79,11 @@ that suppress that timer indefinitely. The app:
 
 1. Polls every **30 s** on `MainActor` (single `Task` loop in `SleepEnforcer`).
 2. Each tick, builds an `EnforcerSnapshot` and runs the pure `Decider.decide(_:)`.
+   Any camera or microphone in active use anywhere on the system is a
+   **global veto** — call apps (FaceTime, Meet, Zoom) hold their keep-awake
+   assertions via daemons (`avconferenced`, `coreaudiod`) that never appear
+   in the blocker list, so the whitelist cannot protect a live call; the
+   capture veto does.
 3. If the decider says `.requestSleep`, calls `SleepActuator.sleepNow()`,
    which is `IOPMFindPowerManagement` + `IOPMSleepSystem` — the same path
    `pmset sleepnow` uses. This sleep request overrides
@@ -102,6 +108,14 @@ Worst-case latency past the configured timeout: poll (≤30 s) + grace (15 s)
   `PreventUserIdleSystemSleep` with level > 0.
 - **Force sleep:** `IOPMFindPowerManagement(kIOMainPortDefault)` →
   `IOPMSleepSystem(port)` → `IOServiceClose(port)`.
+- **Camera in use:** CoreMediaIO — enumerate `kCMIOHardwarePropertyDevices`,
+  check `kCMIODevicePropertyDeviceIsRunningSomewhere` on each.
+- **Microphone in use:** CoreAudio per-process objects —
+  `kAudioHardwarePropertyProcessObjectList` +
+  `kAudioProcessPropertyIsRunningInput` (macOS 14+). Deliberately *not*
+  `kAudioDevicePropertyDeviceIsRunningSomewhere`, which false-positives on
+  combo input/output devices (AirPods, USB headsets) during playback-only
+  use. Neither read triggers a TCC camera/mic permission prompt.
 - **Run-state hardcoded keys** (because Swift's IOKit import drops the CFSTR
   macros): `"AssertType"`, `"AssertLevel"`, `"AssertName"`,
   `"PreventUserIdleSystemSleep"`. See `PowerInfo.swift` for the canonical list.

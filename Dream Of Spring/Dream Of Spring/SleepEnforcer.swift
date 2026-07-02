@@ -11,6 +11,10 @@ final class SleepEnforcer {
     private(set) var configuredTimeoutSeconds: TimeInterval = 0
     private(set) var powerSource: String = ""
     private(set) var blockers: [Blocker] = []
+    /// True when any process is capturing from the camera / microphone —
+    /// a live call or recording. Either one vetoes forced sleep globally.
+    private(set) var cameraInUse: Bool = false
+    private(set) var microphoneInUse: Bool = false
     private(set) var lastDecision: EnforcerAction = .doNothing
     private(set) var lastSleepAttemptAt: Date?
     /// `true` if the most recent actuator call failed. Cleared on success or
@@ -94,12 +98,15 @@ final class SleepEnforcer {
         // 0, which the decider would interpret as the user choosing "Never".
         powerSource = PowerInfo.activePowerSourceKey()
         blockers = PowerInfo.blockingAssertions()
+        cameraInUse = CaptureActivity.cameraInUse()
+        microphoneInUse = CaptureActivity.microphoneInUse()
 
         let active = activeBlockers
         let snapshot = EnforcerSnapshot(
             idleSeconds: idleSeconds,
             configuredTimeoutSeconds: configuredTimeoutSeconds,
             hasActiveBlocker: !active.isEmpty,
+            isCaptureActive: cameraInUse || microphoneInUse,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
             isPaused: isPaused
         )

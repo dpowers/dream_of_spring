@@ -7,6 +7,11 @@ nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     /// each blocker's whitelist policy* — i.e. its effective exemption window
     /// has elapsed. Pre-computed by the enforcer so the decider stays pure.
     var hasActiveBlocker: Bool
+    /// True when any process is capturing from a camera or microphone. A
+    /// forced sleep would kill the live call/recording, and the processes
+    /// holding the real keep-awake assertions for calls are daemons the
+    /// whitelist can never match — so this vetoes enforcement outright.
+    var isCaptureActive: Bool
     var secondsSinceLastSleepAttempt: TimeInterval
     var isPaused: Bool
 }
@@ -26,6 +31,7 @@ nonisolated enum Decider {
     static func decide(_ s: EnforcerSnapshot) -> EnforcerAction {
         if s.isPaused { return .doNothing }
         if s.configuredTimeoutSeconds == 0 { return .doNothing }
+        if s.isCaptureActive { return .doNothing }
         if !s.hasActiveBlocker { return .doNothing }
         if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
         if s.idleSeconds < s.configuredTimeoutSeconds + graceSeconds { return .doNothing }
