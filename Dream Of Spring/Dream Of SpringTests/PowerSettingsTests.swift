@@ -14,29 +14,27 @@ struct PowerSettingsTests {
         #expect(PowerSettings.validated(timeout: -1, sourceBefore: "AC Power", sourceAfter: "AC Power") == nil)
     }
     @Test @MainActor func failedReadCannotEnforceOldTimeoutAndRecovers() {
-        var inputs = EnforcerReadings(idleSeconds: 0,
+        let sensors = TestSensors(EnforcerReadings(idleSeconds: 0,
             settings: PowerSettings(timeoutSeconds: 600, source: "Battery Power"),
-            blockers: [Blocker(pid: 1, identifier: .bundleID("example"), displayName: "Example", reason: "Playback")])
-        var calls = 0
-        var uptime: TimeInterval = 0
+            blockers: [Blocker(pid: 1, identifier: .bundleID("example"), displayName: "Example", reason: "Playback")]))
         let wl = Whitelist(defaults: UserDefaults(suiteName: "SettingsTests." + UUID().uuidString)!)
         let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false,
-            uptime: { uptime }, readInputs: { inputs }, requestSleep: { calls += 1; return true })
+            uptime: { sensors.uptime }, readInputs: { sensors.inputs }, requestSleep: { sensors.sleepCalls += 1; return true })
         enforcer.tick()
         #expect(enforcer.configuredTimeoutSeconds == 600)
-        uptime = 120
-        inputs.idleSeconds = 700
-        inputs.settings = nil
+        sensors.uptime = 120
+        sensors.inputs.idleSeconds = 700
+        sensors.inputs.settings = nil
         enforcer.tick()
-        #expect(calls == 0)
+        #expect(sensors.sleepCalls == 0)
         #expect(!enforcer.hasValidSettings)
         #expect(enforcer.powerSource.isEmpty)
-        inputs.settings = PowerSettings(timeoutSeconds: 0, source: "AC Power")
+        sensors.inputs.settings = PowerSettings(timeoutSeconds: 0, source: "AC Power")
         enforcer.tick()
         #expect(enforcer.hasValidSettings)
-        #expect(calls == 0)
-        inputs.settings = PowerSettings(timeoutSeconds: 600, source: "AC Power")
+        #expect(sensors.sleepCalls == 0)
+        sensors.inputs.settings = PowerSettings(timeoutSeconds: 600, source: "AC Power")
         enforcer.tick()
-        #expect(calls == 1)
+        #expect(sensors.sleepCalls == 1)
     }
 }

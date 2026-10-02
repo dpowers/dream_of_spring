@@ -21,24 +21,22 @@ struct MeetingActivityTests {
         #expect(MeetingActivity.state(runningBundleIDs: ["us.zoom.xos"], assertionReasons: nil) == .active)
     }
     @Test @MainActor func cameraOffMeetingVetoesUnrelatedBlockerUntilAfterMeetingEnds() {
-        var inputs = EnforcerReadings(idleSeconds: 3600,
+        let sensors = TestSensors(EnforcerReadings(idleSeconds: 3600,
             settings: PowerSettings(timeoutSeconds: 60, source: "AC Power"),
             blockers: [Blocker(pid: 1, identifier: .bundleID("browser"), displayName: "Browser", reason: "Playback")],
-            meetingActivity: .active)
-        var time: TimeInterval = 0
-        var calls = 0
+            meetingActivity: .active))
         let wl = Whitelist(defaults: UserDefaults(suiteName: "MeetingTests." + UUID().uuidString)!)
-        let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false, uptime: { time },
-            readInputs: { inputs }, requestSleep: { calls += 1; return true })
+        let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false, uptime: { sensors.uptime },
+            readInputs: { sensors.inputs }, requestSleep: { sensors.sleepCalls += 1; return true })
         enforcer.tick()
-        time = 3600; enforcer.tick()
-        #expect(calls == 0)
-        inputs.meetingActivity = .unknown; time = 3630; enforcer.tick()
-        #expect(calls == 0)
-        inputs.meetingActivity = .inactive; time = 3660; enforcer.tick()
-        time = 3779; enforcer.tick()
-        #expect(calls == 0)
-        time = 3780; enforcer.tick()
-        #expect(calls == 1)
+        sensors.uptime = 3600; enforcer.tick()
+        #expect(sensors.sleepCalls == 0)
+        sensors.inputs.meetingActivity = .unknown; sensors.uptime = 3630; enforcer.tick()
+        #expect(sensors.sleepCalls == 0)
+        sensors.inputs.meetingActivity = .inactive; sensors.uptime = 3660; enforcer.tick()
+        sensors.uptime = 3779; enforcer.tick()
+        #expect(sensors.sleepCalls == 0)
+        sensors.uptime = 3780; enforcer.tick()
+        #expect(sensors.sleepCalls == 1)
     }
 }

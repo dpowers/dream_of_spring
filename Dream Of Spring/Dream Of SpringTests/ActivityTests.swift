@@ -30,23 +30,21 @@ struct ActivityTests {
         #expect(!permitsSleep(state: .inactive, uptime: 300))
     }
     @Test @MainActor func deviceSwitchCannotImmediatelySleep() {
-        var inputs = EnforcerReadings(idleSeconds: 900,
+        let sensors = TestSensors(EnforcerReadings(idleSeconds: 900,
             settings: PowerSettings(timeoutSeconds: 600, source: "AC Power"),
             blockers: [Blocker(pid: 1, identifier: .bundleID("browser"), displayName: "Browser", reason: "Playback")],
-            microphoneActivity: .active)
-        var time: TimeInterval = 0
-        var calls = 0
+            microphoneActivity: .active))
         let wl = Whitelist(defaults: UserDefaults(suiteName: "ActivityTests." + UUID().uuidString)!)
-        let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false, uptime: { time },
-            readInputs: { inputs }, requestSleep: { calls += 1; return true })
+        let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false, uptime: { sensors.uptime },
+            readInputs: { sensors.inputs }, requestSleep: { sensors.sleepCalls += 1; return true })
         enforcer.tick()
-        inputs.microphoneActivity = .unknown; time = 30; enforcer.tick()
-        inputs.microphoneActivity = .inactive; time = 60; enforcer.tick()
-        time = 179; enforcer.tick()
-        #expect(calls == 0)
-        inputs.microphoneActivity = .active; time = 180; enforcer.tick()
-        inputs.microphoneActivity = .inactive; time = 210; enforcer.tick()
-        time = 330; enforcer.tick()
-        #expect(calls == 1)
+        sensors.inputs.microphoneActivity = .unknown; sensors.uptime = 30; enforcer.tick()
+        sensors.inputs.microphoneActivity = .inactive; sensors.uptime = 60; enforcer.tick()
+        sensors.uptime = 179; enforcer.tick()
+        #expect(sensors.sleepCalls == 0)
+        sensors.inputs.microphoneActivity = .active; sensors.uptime = 180; enforcer.tick()
+        sensors.inputs.microphoneActivity = .inactive; sensors.uptime = 210; enforcer.tick()
+        sensors.uptime = 330; enforcer.tick()
+        #expect(sensors.sleepCalls == 1)
     }
 }
