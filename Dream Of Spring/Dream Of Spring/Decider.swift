@@ -14,6 +14,8 @@ nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     var isCaptureActive: Bool
     var secondsSinceLastSleepAttempt: TimeInterval
     var isPaused: Bool
+    /// Shared system-wide deadline, including whitelist exemptions and grace.
+    var enforcementDeadlineSeconds: TimeInterval? = nil
 }
 
 nonisolated enum EnforcerAction: Equatable, Sendable {
@@ -34,7 +36,8 @@ nonisolated enum Decider {
         if s.isCaptureActive { return .doNothing }
         if !s.hasActiveBlocker { return .doNothing }
         if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
-        if s.idleSeconds < s.configuredTimeoutSeconds + graceSeconds { return .doNothing }
+        let deadline = s.enforcementDeadlineSeconds ?? (s.configuredTimeoutSeconds + graceSeconds)
+        if !deadline.isFinite || s.idleSeconds < deadline { return .doNothing }
         return .requestSleep
     }
 }

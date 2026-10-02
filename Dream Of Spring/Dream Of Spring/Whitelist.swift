@@ -3,7 +3,7 @@ import Observation
 import os
 
 nonisolated enum WhitelistPolicy: Hashable, Codable, Sendable {
-    /// Never force sleep on account of this app.
+    /// Veto forced sleep while this app holds a sleep-prevention assertion.
     case alwaysAllow
     /// Treat the app as exempt while user idle is less than this absolute
     /// number of seconds; once idle reaches it, force sleep as usual. Useful
@@ -65,6 +65,14 @@ final class Whitelist {
     func effectiveThreshold(for id: AppIdentifier, configuredTimeout: TimeInterval) -> TimeInterval {
         guard let p = policies[id] else { return configuredTimeout }
         return p.effectiveThreshold(configuredTimeout: configuredTimeout)
+    }
+
+    /// System sleep affects every app, so the longest active exemption wins.
+    /// Infinity means an active app must be allowed to keep the Mac awake.
+    func sleepDeadline(for identifiers: [AppIdentifier], configuredTimeout: TimeInterval) -> TimeInterval? {
+        identifiers.map {
+            effectiveThreshold(for: $0, configuredTimeout: configuredTimeout) + Decider.graceSeconds
+        }.max()
     }
 
     func setPolicy(_ policy: WhitelistPolicy, for id: AppIdentifier) {

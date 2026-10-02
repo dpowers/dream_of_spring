@@ -64,11 +64,15 @@ final class SleepEnforcer {
         blockers.filter { whitelist.policy(for: $0.identifier) != .alwaysAllow }
     }
 
+    var sleepDeadlineSeconds: TimeInterval? {
+        whitelist.sleepDeadline(for: blockers.map(\.identifier), configuredTimeout: configuredTimeoutSeconds)
+    }
+
     private func isActive(blocker: Blocker) -> Bool {
         idleSeconds >= whitelist.effectiveThreshold(
             for: blocker.identifier,
             configuredTimeout: configuredTimeoutSeconds
-        )
+        ) + Decider.graceSeconds
     }
 
     func pause(for duration: TimeInterval?) {
@@ -108,10 +112,11 @@ final class SleepEnforcer {
         let snapshot = EnforcerSnapshot(
             idleSeconds: idleSeconds,
             configuredTimeoutSeconds: configuredTimeoutSeconds,
-            hasActiveBlocker: !active.isEmpty,
+            hasActiveBlocker: !blockers.isEmpty,
             isCaptureActive: cameraInUse || microphoneInUse,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
-            isPaused: isPaused
+            isPaused: isPaused,
+            enforcementDeadlineSeconds: sleepDeadlineSeconds
         )
         lastDecision = Decider.decide(snapshot)
         if lastDecision == .requestSleep {

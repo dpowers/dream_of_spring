@@ -110,18 +110,13 @@ struct MenuContent: View {
         if enforcer.lastActuatorFailed {
             return "Status: ⚠ last sleep attempt failed (see Console.app)"
         }
-        let pendingThresholds = enforcer.blockers
-            .map {
-                enforcer.whitelist.effectiveThreshold(
-                    for: $0.identifier,
-                    configuredTimeout: enforcer.configuredTimeoutSeconds
-                )
-            }
-            .filter { $0.isFinite }
-        guard let earliest = pendingThresholds.min() else {
+        guard let deadline = enforcer.sleepDeadlineSeconds else {
             return "Status: idle (system will sleep on its own)"
         }
-        let remaining = earliest + Decider.graceSeconds - enforcer.idleSeconds
+        guard deadline.isFinite else {
+            return "Status: whitelisted app is keeping the Mac awake"
+        }
+        let remaining = deadline - enforcer.idleSeconds
         if remaining > 0 {
             return "Status: would force sleep in \(format(seconds: remaining))"
         }
