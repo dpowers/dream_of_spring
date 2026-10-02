@@ -12,6 +12,7 @@ enum SleepActuator {
     /// enforcer can surface a persistent failure in the menu rather than
     /// silently looping every cooldown interval.
     static func sleepNow() -> Bool {
+        guard !EnforcementRuntime.isDisabled else { return false }
         let port = IOPMFindPowerManagement(kIOMainPortDefault)
         guard port != 0 else {
             logger.error("IOPMFindPowerManagement returned 0 — no root power management port")

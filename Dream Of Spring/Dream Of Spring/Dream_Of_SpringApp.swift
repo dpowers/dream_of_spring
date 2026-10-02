@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct Dream_Of_SpringApp: App {
-    @State private var enforcer = SleepEnforcer(requestSleep: { SleepActuator.sleepNow() })
+    @State private var enforcer = SleepEnforcer(startAutomatically: !EnforcementRuntime.isDisabled, requestSleep: { SleepActuator.sleepNow() })
     @State private var launchAtLogin = LaunchAtLogin()
 
     var body: some Scene {

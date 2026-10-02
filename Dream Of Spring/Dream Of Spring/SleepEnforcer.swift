@@ -31,6 +31,7 @@ final class SleepEnforcer {
 
     init(
         whitelist: Whitelist? = nil,
+        startAutomatically: Bool = true,
         requestSleep: @MainActor @escaping () -> Bool = {
             print("[Dream Of Spring] would call IOPMSleepSystem now")
             return true
@@ -38,11 +39,13 @@ final class SleepEnforcer {
     ) {
         self.whitelist = whitelist ?? Whitelist()
         self.requestSleep = requestSleep
+        guard startAutomatically else { return }
         tick()
         Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: SleepEnforcer.pollInterval)
-                self?.tick()
+                do { try await Task.sleep(for: SleepEnforcer.pollInterval) } catch { return }
+                guard let self else { return }
+                self.tick()
             }
         }
     }
