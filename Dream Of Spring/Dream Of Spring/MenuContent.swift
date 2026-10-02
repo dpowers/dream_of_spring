@@ -83,6 +83,7 @@ struct MenuContent: View {
     }
 
     private var timerLine: String {
+        guard enforcer.hasValidSettings else { return "Sleep timer: unavailable" }
         let source = enforcer.powerSource.isEmpty ? "" : " (\(enforcer.powerSource))"
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Sleep timer: Never\(source)"
@@ -100,6 +101,9 @@ struct MenuContent: View {
                 return "Status: paused (\(format(seconds: remaining)) left)"
             }
             return "Status: paused"
+        }
+        if !enforcer.hasValidSettings {
+            return "Status: waiting for current power settings — won't force sleep"
         }
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"

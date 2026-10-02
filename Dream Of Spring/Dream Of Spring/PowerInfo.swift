@@ -52,8 +52,6 @@ enum PowerInfo {
     private static let assertionTypeKey = "AssertType"
     private static let assertionLevelKey = "AssertLevel"
     private static let assertionNameKey = "AssertName"
-    private static let acPower = "AC Power"
-    private static let systemSleepKey = "System Sleep Timer"
 
     /// All assertion type strings that prevent the kind of sleep we care about.
     /// `NoIdleSleepAssertion` / `NoDisplaySleepAssertion` are the older
@@ -80,9 +78,7 @@ enum PowerInfo {
 
     /// Reads the currently-active system-sleep timer in seconds. Returns 0 if
     /// the user explicitly chose "Never", and `nil` if reading failed — the
-    /// caller should treat `nil` as "preserve last known value" rather than
-    /// silently collapsing into the "Never" path (which would disable the
-    /// enforcer entirely).
+    /// caller must suppress enforcement until a fresh read succeeds.
     ///
     /// Implementation note: `IOPMCopyPMPreferences` isn't surfaced in the Swift
     /// IOKit module on macOS 26, so we shell out to `pmset -g`, which already
@@ -124,12 +120,18 @@ enum PowerInfo {
         return String(data: data, encoding: .utf8)
     }
 
-    static func activePowerSourceKey() -> String {
-        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return acPower }
+    static func activeSettings() -> PowerSettings? {
+        let before = activePowerSourceKey()
+        let timeout = activeSystemSleepTimeoutSeconds()
+        return PowerSettings.validated(timeout: timeout, sourceBefore: before, sourceAfter: activePowerSourceKey())
+    }
+
+    static func activePowerSourceKey() -> String? {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return nil }
         if let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() {
             return providing as String
         }
-        return acPower
+        return nil
     }
 
     /// Returns the set of GUI apps currently holding any sleep-prevention

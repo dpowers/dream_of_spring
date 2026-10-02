@@ -9,6 +9,7 @@ final class SleepEnforcer {
 
     private(set) var idleSeconds: TimeInterval = 0
     private(set) var configuredTimeoutSeconds: TimeInterval = 0
+    private(set) var hasValidSettings = false
     private(set) var powerSource: String = ""
     private(set) var blockers: [Blocker] = []
     /// True when any process is capturing from the camera / microphone —
@@ -25,6 +26,7 @@ final class SleepEnforcer {
     private(set) var pausedUntil: Date?
 
     let whitelist: Whitelist
+    private let readInputs: @MainActor () -> EnforcerReadings
     private let requestSleep: @MainActor () -> Bool
 
     private static let pollInterval: Duration = .seconds(30)
@@ -32,6 +34,7 @@ final class SleepEnforcer {
     init(
         whitelist: Whitelist? = nil,
         startAutomatically: Bool = true,
+        readInputs: @MainActor @escaping () -> EnforcerReadings = { EnforcerReadings.read() },
         requestSleep: @MainActor @escaping () -> Bool = {
             print("[Dream Of Spring] would call IOPMSleepSystem now")
             return true
@@ -39,6 +42,7 @@ final class SleepEnforcer {
     ) {
         self.whitelist = whitelist ?? Whitelist()
         self.requestSleep = requestSleep
+        self.readInputs = readInputs
         guard startAutomatically else { return }
         tick()
         Task { [weak self] in
@@ -91,22 +95,20 @@ final class SleepEnforcer {
         Self.logger.info("Resumed")
     }
 
-    private func tick() {
+    func tick() {
         // Auto-resume if a timed pause has elapsed.
         if isPaused, let until = pausedUntil, Date() >= until {
             resume()
         }
 
-        idleSeconds = PowerInfo.userIdleSeconds()
-        if let t = PowerInfo.activeSystemSleepTimeoutSeconds() {
-            configuredTimeoutSeconds = t
-        }
-        // pmset failure: keep the last known timeout rather than collapsing to
-        // 0, which the decider would interpret as the user choosing "Never".
-        powerSource = PowerInfo.activePowerSourceKey()
-        blockers = PowerInfo.blockingAssertions()
-        cameraInUse = CaptureActivity.cameraInUse()
-        microphoneInUse = CaptureActivity.microphoneInUse()
+        let inputs = readInputs()
+        idleSeconds = inputs.idleSeconds
+        hasValidSettings = inputs.settings != nil
+        configuredTimeoutSeconds = inputs.settings?.timeoutSeconds ?? 0
+        powerSource = inputs.settings?.source ?? ""
+        blockers = inputs.blockers
+        cameraInUse = inputs.cameraInUse
+        microphoneInUse = inputs.microphoneInUse
 
         let active = activeBlockers
         let snapshot = EnforcerSnapshot(
