@@ -114,10 +114,11 @@ echo "==> Verifying the stapled .app passes Gatekeeper…"
 spctl --assess --type execute --verbose "$EXPORTED_APP" 2>&1 | head -3
 xcrun stapler validate "$EXPORTED_APP" | tail -1
 
+# VERSION is the build date (calver) stamped by the "Stamp version with
+# build date" phase, so it already names the artifact unambiguously.
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$EXPORTED_APP/Contents/Info.plist")"
-DATE="$(date +%Y-%m-%d)"
 FOLDER_NAME="Dream Of Spring"
-PACKAGE_BASENAME="Dream-Of-Spring-${VERSION}-${DATE}"
+PACKAGE_BASENAME="Dream-Of-Spring-${VERSION}"
 
 PACKAGE_DIR="$STAGE/$FOLDER_NAME"
 mkdir -p "$PACKAGE_DIR"

@@ -235,6 +235,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		DA7EB01D2E0000010000CAFE /* Stamp version with build date */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -252,7 +253,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Version = build date, canonical YYYY-MM-DD (calver). The Info.plist is\n# declared as both input and output so Xcode treats this as an in-place\n# mutation ordered after plist generation and before code signing; the\n# marker is the non-mutable output node the build system requires.\nBUILD_DATE=$(date +%Y-%m-%d)\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString ${BUILD_DATE}\" \"${PLIST}\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :CFBundleShortVersionString string ${BUILD_DATE}\" \"${PLIST}\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion ${BUILD_DATE}\" \"${PLIST}\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :CFBundleVersion string ${BUILD_DATE}\" \"${PLIST}\"\necho \"${BUILD_DATE}\" > \"${DERIVED_FILE_DIR}/version-stamp.marker\"\n";
+			shellScript = "# Version = build date (calver). CFBundleShortVersionString gets the\n# canonical YYYY-MM-DD; CFBundleVersion gets YYYY.MM.DD — macOS allows only\n# period-separated integers in that key. The Info.plist is declared as both\n# input and output so this runs after plist generation and before code\n# signing; the marker is the non-mutable output node the build system\n# requires. Mutating the generated plist makes ProcessInfoPlistFile reset\n# it (and re-sign) on every build — accepted cost of stamping post-hoc; a\n# write-on-change guard cannot converge, so don't add one. alwaysOutOfDate\n# just makes the every-build contract explicit. No Add fallback: plist\n# generation always seeds both keys, so a missing key is config drift and\n# Set failing the build loudly is what we want.\nset -eu\nBUILD_DATE=$(date +%Y-%m-%d)\nBUILD_NUM=$(date +%Y.%m.%d)\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\ntest -f \"${PLIST}\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString ${BUILD_DATE}\" -c \"Set :CFBundleVersion ${BUILD_NUM}\" \"${PLIST}\"\necho \"${BUILD_DATE}\" > \"${DERIVED_FILE_DIR}/version-stamp.marker\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

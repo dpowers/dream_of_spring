@@ -67,11 +67,19 @@ open "$(xcodebuild -project 'Dream Of Spring.xcodeproj' -scheme 'Dream Of Spring
 - **App Sandbox:** **OFF** (`ENABLE_APP_SANDBOX = NO`). Required so `IOPMSleepSystem` can open an IOKit user-client to `IOPMrootDomain`. Do not re-enable without first introducing a privileged helper.
 - **`LSUIElement`:** ON via `INFOPLIST_KEY_LSUIElement = YES` — no Dock icon, no app menu, menu-bar only.
 - **Hardened Runtime:** ON
-- **Versioning:** calver — `CFBundleShortVersionString` / `CFBundleVersion`
-  are overwritten with the build date (`YYYY-MM-DD`) by the "Stamp version
-  with build date" run-script phase (runs every build; the
-  `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` build settings are unused
-  placeholders). The menu shows it as "Version …" above Quit.
+- **Versioning:** calver — the "Stamp version with build date" run-script
+  phase overwrites `CFBundleShortVersionString` with the build date
+  (`YYYY-MM-DD`) and `CFBundleVersion` with `YYYY.MM.DD` (macOS allows only
+  period-separated integers in that key). The phase runs every build
+  (`alwaysOutOfDate`), and because it mutates the generated Info.plist,
+  every build re-processes the plist and re-signs the app — a no-change
+  rebuild is never a no-op; accepted cost, don't try to optimize it away
+  with a write-on-change guard (the plist gets reset to the placeholders
+  each build, so the guard never converges). The `MARKETING_VERSION` /
+  `CURRENT_PROJECT_VERSION` build settings never ship, but they seed the
+  generated Info.plist's version keys that the stamp's `Set` requires —
+  deleting them fails the build. The menu shows the version as "Version …"
+  above Quit.
 - **Tests:** unit target uses Swift Testing (`#expect`, `@Test`); UI target uses XCTest. Run with `xcodebuild … test -only-testing:"Dream Of SpringTests"` to skip the slower UI tests.
 - **Logging subsystem:** `art.gardenplanner.dream-of-spring`. Stream with `log stream --predicate 'subsystem == "art.gardenplanner.dream-of-spring"'`.
 
