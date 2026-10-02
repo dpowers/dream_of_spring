@@ -16,9 +16,9 @@ import os
 enum CaptureActivity {
     private static let logger = Logger(subsystem: "art.gardenplanner.dream-of-spring", category: "capture")
 
-    /// True when any camera (CoreMediaIO device) is running in any process —
+    /// Active when any camera (CoreMediaIO device) is running in any process —
     /// the same signal that drives the system's green camera indicator.
-    static func cameraInUse() -> Bool {
+    static func cameraInUse() -> ActivityState {
         var listAddress = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
             mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
@@ -28,38 +28,41 @@ enum CaptureActivity {
         var dataSize: UInt32 = 0
         guard CMIOObjectGetPropertyDataSize(system, &listAddress, 0, nil, &dataSize) == kCMIOHardwareNoError else {
             logger.error("CMIO device list size read failed")
-            return false
+            return .unknown
         }
         let count = Int(dataSize) / MemoryLayout<CMIOObjectID>.size
-        guard count > 0 else { return false }
+        guard count > 0 else { return .inactive }
         var devices = [CMIOObjectID](repeating: 0, count: count)
         var dataUsed: UInt32 = 0
         guard CMIOObjectGetPropertyData(system, &listAddress, 0, nil, dataSize, &dataUsed, &devices) == kCMIOHardwareNoError else {
             logger.error("CMIO device list read failed")
-            return false
+            return .unknown
         }
         var runningAddress = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere),
-            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeWildcard),
-            mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementWildcard)
+            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+            mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain)
         )
-        for device in devices {
+        guard dataUsed <= dataSize, Int(dataUsed) % MemoryLayout<CMIOObjectID>.size == 0 else { return .unknown }
+        var states: [ActivityState] = []
+        for device in devices.prefix(Int(dataUsed) / MemoryLayout<CMIOObjectID>.size) {
             var isRunning: UInt32 = 0
             var used: UInt32 = 0
-            if CMIOObjectGetPropertyData(device, &runningAddress, 0, nil, UInt32(MemoryLayout<UInt32>.size), &used, &isRunning) == kCMIOHardwareNoError,
-               isRunning != 0 {
-                return true
-            }
+            let status = CMIOObjectGetPropertyData(device, &runningAddress, 0, nil,
+                UInt32(MemoryLayout<UInt32>.size), &used, &isRunning)
+            let state = ActivityState.sample(status: status, value: isRunning, bytes: used)
+            if state == .unknown { logger.error("CMIO running-state read failed: \(status)") }
+            states.append(state)
         }
-        return false
+        return .combined(states)
     }
 
-    /// True when any process has an active *input* audio stream — i.e. is
+    /// Active when any process has an active *input* audio stream — i.e. is
     /// actually capturing microphone audio. Uses the per-process CoreAudio
     /// objects rather than `kAudioDevicePropertyDeviceIsRunningSomewhere`,
     /// which would false-positive on combo input/output devices (AirPods,
     /// USB headsets) whenever they merely play sound.
-    static func microphoneInUse() -> Bool {
+    static func microphoneInUse() -> ActivityState {
         var listAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -69,28 +72,31 @@ enum CaptureActivity {
         var dataSize: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &dataSize) == noErr else {
             logger.error("CoreAudio process list size read failed")
-            return false
+            return .unknown
         }
         let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
-        guard count > 0 else { return false }
+        guard count > 0 else { return .inactive }
         var processes = [AudioObjectID](repeating: 0, count: count)
         guard AudioObjectGetPropertyData(system, &listAddress, 0, nil, &dataSize, &processes) == noErr else {
             logger.error("CoreAudio process list read failed")
-            return false
+            return .unknown
         }
         var runningInputAddress = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningInput,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        for process in processes {
+        guard Int(dataSize) <= processes.count * MemoryLayout<AudioObjectID>.size,
+              Int(dataSize) % MemoryLayout<AudioObjectID>.size == 0 else { return .unknown }
+        var states: [ActivityState] = []
+        for process in processes.prefix(Int(dataSize) / MemoryLayout<AudioObjectID>.size) {
             var isRunning: UInt32 = 0
             var size = UInt32(MemoryLayout<UInt32>.size)
-            if AudioObjectGetPropertyData(process, &runningInputAddress, 0, nil, &size, &isRunning) == noErr,
-               isRunning != 0 {
-                return true
-            }
+            let status = AudioObjectGetPropertyData(process, &runningInputAddress, 0, nil, &size, &isRunning)
+            let state = ActivityState.sample(status: status, value: isRunning, bytes: size)
+            if state == .unknown { logger.error("CoreAudio input-state read failed: \(status)") }
+            states.append(state)
         }
-        return false
+        return .combined(states)
     }
 }

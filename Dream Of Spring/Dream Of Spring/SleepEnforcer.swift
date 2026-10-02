@@ -14,8 +14,13 @@ final class SleepEnforcer {
     private(set) var blockers: [Blocker] = []
     /// True when any process is capturing from the camera / microphone —
     /// a live call or recording. Either one vetoes forced sleep globally.
-    private(set) var cameraInUse: Bool = false
-    private(set) var microphoneInUse: Bool = false
+    private(set) var cameraActivity: ActivityState = .unknown
+    private(set) var microphoneActivity: ActivityState = .unknown
+    private(set) var isCaptureProtected = true
+    var cameraInUse: Bool { cameraActivity == .active }
+    var microphoneInUse: Bool { microphoneActivity == .active }
+    private var captureClearance = ActivityClearance()
+    private let uptime: @MainActor () -> TimeInterval
     private(set) var lastDecision: EnforcerAction = .doNothing
     private(set) var lastSleepAttemptAt: Date?
     /// `true` if the most recent actuator call failed. Cleared on success or
@@ -34,6 +39,7 @@ final class SleepEnforcer {
     init(
         whitelist: Whitelist? = nil,
         startAutomatically: Bool = true,
+        uptime: @MainActor @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         readInputs: @MainActor @escaping () -> EnforcerReadings = { EnforcerReadings.read() },
         requestSleep: @MainActor @escaping () -> Bool = {
             print("[Dream Of Spring] would call IOPMSleepSystem now")
@@ -43,6 +49,7 @@ final class SleepEnforcer {
         self.whitelist = whitelist ?? Whitelist()
         self.requestSleep = requestSleep
         self.readInputs = readInputs
+        self.uptime = uptime
         guard startAutomatically else { return }
         tick()
         Task { [weak self] in
@@ -107,15 +114,17 @@ final class SleepEnforcer {
         configuredTimeoutSeconds = inputs.settings?.timeoutSeconds ?? 0
         powerSource = inputs.settings?.source ?? ""
         blockers = inputs.blockers
-        cameraInUse = inputs.cameraInUse
-        microphoneInUse = inputs.microphoneInUse
+        cameraActivity = inputs.cameraActivity
+        microphoneActivity = inputs.microphoneActivity
+        isCaptureProtected = !captureClearance.permitsSleep(
+            state: .combined([cameraActivity, microphoneActivity]), uptime: uptime())
 
         let active = activeBlockers
         let snapshot = EnforcerSnapshot(
             idleSeconds: idleSeconds,
             configuredTimeoutSeconds: configuredTimeoutSeconds,
             hasActiveBlocker: !blockers.isEmpty,
-            isCaptureActive: cameraInUse || microphoneInUse,
+            isCaptureActive: isCaptureProtected,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
             isPaused: isPaused,
             enforcementDeadlineSeconds: sleepDeadlineSeconds

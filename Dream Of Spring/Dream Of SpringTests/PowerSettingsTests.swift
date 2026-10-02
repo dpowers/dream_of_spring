@@ -18,11 +18,13 @@ struct PowerSettingsTests {
             settings: PowerSettings(timeoutSeconds: 600, source: "Battery Power"),
             blockers: [Blocker(pid: 1, identifier: .bundleID("example"), displayName: "Example", reason: "Playback")])
         var calls = 0
+        var uptime: TimeInterval = 0
         let wl = Whitelist(defaults: UserDefaults(suiteName: "SettingsTests." + UUID().uuidString)!)
         let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false,
-            readInputs: { inputs }, requestSleep: { calls += 1; return true })
+            uptime: { uptime }, readInputs: { inputs }, requestSleep: { calls += 1; return true })
         enforcer.tick()
         #expect(enforcer.configuredTimeoutSeconds == 600)
+        uptime = 120
         inputs.idleSeconds = 700
         inputs.settings = nil
         enforcer.tick()

@@ -8,8 +8,8 @@ struct EnforcerReadings {
     var idleSeconds: TimeInterval
     var settings: PowerSettings?
     var blockers: [Blocker]
-    var cameraInUse: Bool = false
-    var microphoneInUse: Bool = false
+    var cameraActivity: ActivityState = .inactive
+    var microphoneActivity: ActivityState = .inactive
 
     static func read() -> Self {
         let settings = PowerInfo.activeSettings()
@@ -18,7 +18,7 @@ struct EnforcerReadings {
         let microphone = CaptureActivity.microphoneInUse()
         // Read idle last so the pmset subprocess cannot leave an old HID sample.
         return Self(idleSeconds: PowerInfo.userIdleSeconds(), settings: settings,
-                    blockers: blockers, cameraInUse: camera, microphoneInUse: microphone)
+                    blockers: blockers, cameraActivity: camera, microphoneActivity: microphone)
     }
 }
 

@@ -111,6 +111,12 @@ struct MenuContent: View {
         if enforcer.cameraInUse || enforcer.microphoneInUse {
             return "Status: \(captureDescription) in use — won't force sleep"
         }
+        if enforcer.cameraActivity == .unknown || enforcer.microphoneActivity == .unknown {
+            return "Status: capture activity unavailable — won't force sleep"
+        }
+        if enforcer.isCaptureProtected {
+            return "Status: waiting for camera and microphone to stay inactive"
+        }
         if enforcer.lastActuatorFailed {
             return "Status: ⚠ last sleep attempt failed (see Console.app)"
         }
