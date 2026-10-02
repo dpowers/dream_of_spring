@@ -16,6 +16,7 @@ nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     var isPaused: Bool
     /// Shared system-wide deadline, including whitelist exemptions and grace.
     var enforcementDeadlineSeconds: TimeInterval? = nil
+    var isMeetingProtected: Bool = false
 }
 
 nonisolated enum EnforcerAction: Equatable, Sendable {
@@ -33,7 +34,7 @@ nonisolated enum Decider {
     static func decide(_ s: EnforcerSnapshot) -> EnforcerAction {
         if s.isPaused { return .doNothing }
         if s.configuredTimeoutSeconds == 0 { return .doNothing }
-        if s.isCaptureActive { return .doNothing }
+        if s.isCaptureActive || s.isMeetingProtected { return .doNothing }
         if !s.hasActiveBlocker { return .doNothing }
         if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
         let deadline = s.enforcementDeadlineSeconds ?? (s.configuredTimeoutSeconds + graceSeconds)

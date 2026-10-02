@@ -20,6 +20,9 @@ final class SleepEnforcer {
     var cameraInUse: Bool { cameraActivity == .active }
     var microphoneInUse: Bool { microphoneActivity == .active }
     private var captureClearance = ActivityClearance()
+    private var meetingClearance = ActivityClearance()
+    private(set) var meetingActivity: ActivityState = .unknown
+    private(set) var isMeetingProtected = true
     private let uptime: @MainActor () -> TimeInterval
     private(set) var lastDecision: EnforcerAction = .doNothing
     private(set) var lastSleepAttemptAt: Date?
@@ -116,8 +119,11 @@ final class SleepEnforcer {
         blockers = inputs.blockers
         cameraActivity = inputs.cameraActivity
         microphoneActivity = inputs.microphoneActivity
+        let sampleUptime = uptime()
+        meetingActivity = inputs.meetingActivity
+        isMeetingProtected = !meetingClearance.permitsSleep(state: meetingActivity, uptime: sampleUptime)
         isCaptureProtected = !captureClearance.permitsSleep(
-            state: .combined([cameraActivity, microphoneActivity]), uptime: uptime())
+            state: .combined([cameraActivity, microphoneActivity]), uptime: sampleUptime)
 
         let active = activeBlockers
         let snapshot = EnforcerSnapshot(
@@ -127,7 +133,8 @@ final class SleepEnforcer {
             isCaptureActive: isCaptureProtected,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
             isPaused: isPaused,
-            enforcementDeadlineSeconds: sleepDeadlineSeconds
+            enforcementDeadlineSeconds: sleepDeadlineSeconds,
+            isMeetingProtected: isMeetingProtected
         )
         lastDecision = Decider.decide(snapshot)
         if lastDecision == .requestSleep {

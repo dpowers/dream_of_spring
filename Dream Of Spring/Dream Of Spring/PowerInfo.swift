@@ -139,15 +139,24 @@ enum PowerInfo {
     /// `sharingd`, `mDNSResponder`, etc.) are deliberately excluded — the
     /// user's policy is "ignore apps that prevent sleep", and macOS's own
     /// coordinating assertions are not in scope.
-    static func blockingAssertions() -> [Blocker] {
+    static func assertionSnapshot() -> AssertionReadings? {
         var unmanagedDict: Unmanaged<CFDictionary>?
         guard IOPMCopyAssertionsByProcess(&unmanagedDict) == kIOReturnSuccess,
               let raw = unmanagedDict?.takeRetainedValue() as? [NSNumber: [[String: Any]]]
-        else { return [] }
+        else { return nil }
 
         var result: [Blocker] = []
+        var reasons: [String] = []
         for (pidNum, assertions) in raw {
             let pid = pid_t(pidNum.int32Value)
+            // Keep meeting signals before filtering to GUI apps: browser
+            // helpers and conferencing daemons can own these assertions.
+            for assertion in assertions {
+                let level = (assertion[assertionLevelKey] as? NSNumber)?.intValue ?? 0
+                if level > 0, let reason = assertion[assertionNameKey] as? String {
+                    reasons.append(reason)
+                }
+            }
             guard let app = NSRunningApplication(processIdentifier: pid),
                   let bid = app.bundleIdentifier else { continue }
             let matching = assertions.filter { dict in
@@ -163,6 +172,6 @@ enum PowerInfo {
                 result.append(Blocker(pid: pid, identifier: identifier, displayName: name, reason: reason))
             }
         }
-        return result.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        return AssertionReadings(blockers: result.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }, reasons: reasons)
     }
 }

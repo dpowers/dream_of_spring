@@ -10,15 +10,18 @@ struct EnforcerReadings {
     var blockers: [Blocker]
     var cameraActivity: ActivityState = .inactive
     var microphoneActivity: ActivityState = .inactive
+    var meetingActivity: ActivityState = .inactive
 
     static func read() -> Self {
         let settings = PowerInfo.activeSettings()
-        let blockers = PowerInfo.blockingAssertions()
+        let assertions = PowerInfo.assertionSnapshot()
+        let meeting = MeetingActivity.read(assertionReasons: assertions?.reasons)
         let camera = CaptureActivity.cameraInUse()
         let microphone = CaptureActivity.microphoneInUse()
         // Read idle last so the pmset subprocess cannot leave an old HID sample.
         return Self(idleSeconds: PowerInfo.userIdleSeconds(), settings: settings,
-                    blockers: blockers, cameraActivity: camera, microphoneActivity: microphone)
+                    blockers: assertions?.blockers ?? [], cameraActivity: camera,
+                    microphoneActivity: microphone, meetingActivity: meeting)
     }
 }
 
@@ -31,4 +34,9 @@ nonisolated struct PowerSettings: Equatable, Sendable {
               let sourceBefore, sourceBefore == sourceAfter else { return nil }
         return Self(timeoutSeconds: timeout, source: sourceBefore)
     }
+}
+
+struct AssertionReadings {
+    let blockers: [Blocker]
+    let reasons: [String]
 }

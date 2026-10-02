@@ -108,6 +108,12 @@ struct MenuContent: View {
         if enforcer.configuredTimeoutSeconds == 0 {
             return "Status: dormant (sleep set to Never)"
         }
+        if enforcer.meetingActivity == .active {
+            return "Status: meeting app or screen sharing detected — won't force sleep"
+        }
+        if enforcer.meetingActivity == .unknown {
+            return "Status: meeting activity unavailable — won't force sleep"
+        }
         if enforcer.cameraInUse || enforcer.microphoneInUse {
             return "Status: \(captureDescription) in use — won't force sleep"
         }
@@ -116,6 +122,9 @@ struct MenuContent: View {
         }
         if enforcer.isCaptureProtected {
             return "Status: waiting for camera and microphone to stay inactive"
+        }
+        if enforcer.isMeetingProtected {
+            return "Status: waiting for meeting activity to stay inactive"
         }
         if enforcer.lastActuatorFailed {
             return "Status: ⚠ last sleep attempt failed (see Console.app)"
