@@ -24,8 +24,10 @@ final class SleepEnforcer {
     private(set) var meetingActivity: ActivityState = .unknown
     private(set) var isMeetingProtected = true
     private let uptime: @MainActor () -> TimeInterval
+    private let wallClock: @MainActor () -> Date
     private(set) var lastDecision: EnforcerAction = .doNothing
     private(set) var lastSleepAttemptAt: Date?
+    private var lastSleepAttemptUptime: TimeInterval?
     /// `true` if the most recent actuator call failed. Cleared on success or
     /// when no attempt has been made yet. Surfaced in the menu so a stuck
     /// actuator isn't silently looping every cooldown interval.
@@ -43,6 +45,7 @@ final class SleepEnforcer {
         whitelist: Whitelist? = nil,
         startAutomatically: Bool = true,
         uptime: @MainActor @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        wallClock: @MainActor @escaping () -> Date = { Date() },
         readInputs: @MainActor @escaping () -> EnforcerReadings = { EnforcerReadings.read() },
         requestSleep: @MainActor @escaping () -> Bool = {
             print("[Dream Of Spring] would call IOPMSleepSystem now")
@@ -53,6 +56,7 @@ final class SleepEnforcer {
         self.requestSleep = requestSleep
         self.readInputs = readInputs
         self.uptime = uptime
+        self.wallClock = wallClock
         guard startAutomatically else { return }
         tick()
         Task { [weak self] in
@@ -91,7 +95,7 @@ final class SleepEnforcer {
 
     func pause(for duration: TimeInterval?) {
         isPaused = true
-        pausedUntil = duration.map { Date().addingTimeInterval($0) }
+        pausedUntil = duration.map { wallClock().addingTimeInterval($0) }
         if let duration {
             Self.logger.info("Paused for \(Int(duration), privacy: .public) seconds")
         } else {
@@ -107,7 +111,7 @@ final class SleepEnforcer {
 
     func tick() {
         // Auto-resume if a timed pause has elapsed.
-        if isPaused, let until = pausedUntil, Date() >= until {
+        if isPaused, let until = pausedUntil, wallClock() >= until {
             resume()
         }
 
@@ -140,7 +144,8 @@ final class SleepEnforcer {
         if lastDecision == .requestSleep {
             Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s active-blockers=\(active.count, privacy: .public)")
             lastActuatorFailed = !requestSleep()
-            lastSleepAttemptAt = Date()
+            lastSleepAttemptAt = wallClock()
+            lastSleepAttemptUptime = uptime()
         } else if active.isEmpty {
             // Nothing is keeping the Mac awake any more (user returned, or the
             // blocker released its assertion), so a prior failure is stale —
@@ -150,7 +155,7 @@ final class SleepEnforcer {
     }
 
     private var secondsSinceLastSleepAttempt: TimeInterval {
-        guard let last = lastSleepAttemptAt else { return .greatestFiniteMagnitude }
-        return Date().timeIntervalSince(last)
+        guard let last = lastSleepAttemptUptime else { return .greatestFiniteMagnitude }
+        return uptime() - last
     }
 }
