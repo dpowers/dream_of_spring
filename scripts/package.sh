@@ -53,6 +53,7 @@ DEVELOPER_DIR="$DEVELOPER_DIR" xcodebuild archive \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration Release \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
     -archivePath "$ARCHIVE" \
     -derivedDataPath "$DERIVED" \
     -quiet
