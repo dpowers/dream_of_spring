@@ -59,6 +59,17 @@ final class Whitelist {
 
     func policy(for id: AppIdentifier) -> WhitelistPolicy? { policies[id] }
 
+    /// Display the same strongest exemption that enforcement applies to an
+    /// app and its helpers, including policies saved under older helper IDs.
+    func policy(for identifiers: [AppIdentifier]) -> WhitelistPolicy? {
+        let matching = identifiers.compactMap { policies[$0] }
+        if matching.contains(.alwaysAllow) { return .alwaysAllow }
+        return matching.compactMap { policy -> TimeInterval? in
+            if case .allowUpTo(let seconds) = policy { return seconds }
+            return nil
+        }.max().map { .allowUpTo(seconds: $0) }
+    }
+
     /// Idle-time threshold past which an app with this identifier's policy
     /// stops being exempt and counts as an active blocker. `nil` (no entry)
     /// returns `configuredTimeout`; `.alwaysAllow` returns `.infinity`.
@@ -75,7 +86,8 @@ final class Whitelist {
         }.max()
     }
 
-    func setPolicy(_ policy: WhitelistPolicy, for id: AppIdentifier) {
+    func setPolicy(_ policy: WhitelistPolicy?, for id: AppIdentifier, replacing aliases: [AppIdentifier] = []) {
+        for alias in aliases { policies.removeValue(forKey: alias) }
         policies[id] = policy
         save()
     }

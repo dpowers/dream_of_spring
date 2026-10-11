@@ -79,18 +79,20 @@ final class SleepEnforcer {
     /// blockers whose grace window hasn't elapsed yet. Used by the status
     /// icon, where "active right now" is too narrow.
     var nonAlwaysAllowedBlockers: [Blocker] {
-        blockers.filter { whitelist.policy(for: $0.identifier) != .alwaysAllow }
+        blockers.filter { blocker in
+            !blocker.policyIdentifiers.contains { whitelist.policy(for: $0) == .alwaysAllow }
+        }
     }
 
     var sleepDeadlineSeconds: TimeInterval? {
-        whitelist.sleepDeadline(for: blockers.map(\.identifier), configuredTimeout: configuredTimeoutSeconds)
+        whitelist.sleepDeadline(for: blockers.flatMap(\.policyIdentifiers), configuredTimeout: configuredTimeoutSeconds)
     }
 
     private func isActive(blocker: Blocker) -> Bool {
-        idleSeconds >= whitelist.effectiveThreshold(
-            for: blocker.identifier,
-            configuredTimeout: configuredTimeoutSeconds
-        ) + Decider.graceSeconds
+        guard let deadline = whitelist.sleepDeadline(
+            for: blocker.policyIdentifiers, configuredTimeout: configuredTimeoutSeconds
+        ) else { return false }
+        return idleSeconds >= deadline
     }
 
     func pause(for duration: TimeInterval?) {

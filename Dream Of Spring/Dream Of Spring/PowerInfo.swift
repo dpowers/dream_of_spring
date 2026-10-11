@@ -3,6 +3,7 @@ import IOKit
 import IOKit.pwr_mgt
 import IOKit.ps
 import AppKit
+import Darwin
 import os
 
 nonisolated enum AppIdentifier: Hashable, Codable, Sendable {
@@ -44,6 +45,10 @@ struct Blocker: Identifiable, Hashable, Sendable {
     let identifier: AppIdentifier
     let displayName: String
     let reason: String
+    var alternateIdentifiers: [AppIdentifier] = []
+
+    /// Retain policies saved for helper bundle IDs before owner resolution.
+    var policyIdentifiers: [AppIdentifier] { [identifier] + alternateIdentifiers }
 }
 
 enum PowerInfo {
@@ -134,11 +139,9 @@ enum PowerInfo {
         return nil
     }
 
-    /// Returns the set of GUI apps currently holding any sleep-prevention
-    /// assertion. System daemons without a bundle identifier (`powerd`,
-    /// `sharingd`, `mDNSResponder`, etc.) are deliberately excluded — the
-    /// user's policy is "ignore apps that prevent sleep", and macOS's own
-    /// coordinating assertions are not in scope.
+    /// Returns app-owned sleep-prevention assertions, including embedded
+    /// background helpers. System daemons without an owning app (`powerd`,
+    /// `sharingd`, `mDNSResponder`, etc.) remain excluded.
     static func assertionSnapshot() -> AssertionReadings? {
         var unmanagedDict: Unmanaged<CFDictionary>?
         guard IOPMCopyAssertionsByProcess(&unmanagedDict) == kIOReturnSuccess,
@@ -157,21 +160,46 @@ enum PowerInfo {
                     reasons.append(reason)
                 }
             }
-            guard let app = NSRunningApplication(processIdentifier: pid),
-                  let bid = app.bundleIdentifier else { continue }
             let matching = assertions.filter { dict in
                 let type = dict[assertionTypeKey] as? String ?? ""
                 let level = (dict[assertionLevelKey] as? NSNumber)?.intValue ?? 0
                 return sleepBlockingTypes.contains(type) && level > 0
             }
             guard !matching.isEmpty else { continue }
-            let identifier: AppIdentifier = .bundleID(bid)
-            let name = app.localizedName ?? bid
+            guard let owner = assertionOwner(pid: pid) else { continue }
             for a in matching {
                 let reason = (a[assertionNameKey] as? String) ?? "(unnamed)"
-                result.append(Blocker(pid: pid, identifier: identifier, displayName: name, reason: reason))
+                result.append(Blocker(pid: pid, identifier: .bundleID(owner.bundleID),
+                                      displayName: owner.displayName, reason: reason,
+                                      alternateIdentifiers: owner.alternateBundleIDs.map(AppIdentifier.bundleID)))
             }
         }
         return AssertionReadings(blockers: result.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }, reasons: reasons)
+    }
+
+    static func assertionOwner(pid: pid_t) -> AssertionOwner? {
+        let app = NSRunningApplication(processIdentifier: pid)
+        let runningIdentity = app?.bundleIdentifier.map {
+            AssertionOwner(bundleID: $0, displayName: app?.localizedName ?? $0)
+        }
+        let executableURL = app?.executableURL ?? processExecutableURL(pid: pid)
+        return AssertionOwnerResolver.resolve(runningApp: runningIdentity,
+                                               executableURL: executableURL?.resolvingSymlinksInPath()) { url in
+            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !id.isEmpty else { return nil }
+            let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+                ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+                ?? url.deletingPathExtension().lastPathComponent
+            return AssertionOwner(bundleID: id, displayName: name)
+        }
+    }
+
+    private static func processExecutableURL(pid: pid_t) -> URL? {
+        // PROC_PIDPATHINFO_MAXSIZE is (4 * MAXPATHLEN), a macro Swift does not import.
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = buffer.withUnsafeMutableBytes {
+            proc_pidpath(pid, $0.baseAddress, UInt32($0.count))
+        }
+        guard length > 0 else { return nil }
+        return URL(filePath: String(cString: buffer))
     }
 }

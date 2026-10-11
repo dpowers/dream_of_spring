@@ -20,7 +20,8 @@ struct MenuContent: View {
                 BlockerPolicyMenu(
                     whitelist: enforcer.whitelist,
                     identifier: blocker.identifier,
-                    label: "\(marker(for: enforcer.whitelist.policy(for: blocker.identifier)))  \(blocker.displayName) — \(blocker.reason)"
+                    alternateIdentifiers: blocker.alternateIdentifiers,
+                    label: "\(marker(for: enforcer.whitelist.policy(for: blocker.policyIdentifiers)))  \(blocker.displayName) — \(blocker.reason)"
                 )
             }
         }
@@ -206,22 +207,23 @@ struct MenuContent: View {
 private struct BlockerPolicyMenu: View {
     let whitelist: Whitelist
     let identifier: AppIdentifier
+    var alternateIdentifiers: [AppIdentifier] = []
     let label: String
 
     var body: some View {
         Menu {
-            let current = whitelist.policy(for: identifier)
+            let current = whitelist.policy(for: [identifier] + alternateIdentifiers)
             Button(check(current == nil) + "Don't whitelist") {
-                whitelist.remove(identifier)
+                whitelist.setPolicy(nil, for: identifier, replacing: alternateIdentifiers)
             }
             Button(check(current == .alwaysAllow) + "Always allow") {
-                whitelist.setPolicy(.alwaysAllow, for: identifier)
+                whitelist.setPolicy(.alwaysAllow, for: identifier, replacing: alternateIdentifiers)
             }
             Divider()
             ForEach(WhitelistPreset.allowUpToOptions, id: \.label) { preset in
                 let isSelected = current == .allowUpTo(seconds: preset.seconds)
                 Button(check(isSelected) + "Allow up to \(preset.label)") {
-                    whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier)
+                    whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier, replacing: alternateIdentifiers)
                 }
             }
         } label: {

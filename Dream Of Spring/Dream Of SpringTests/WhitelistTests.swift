@@ -96,4 +96,30 @@ struct WhitelistTests {
         #expect(!wl.contains(id))
         #expect(wl.policy(for: id) == nil)
     }
+
+    @Test func combinedPolicyShowsTheStrongestParentOrHelperExemption() {
+        let wl = Whitelist(defaults: freshDefaults())
+        let parent: AppIdentifier = .bundleID("com.example.app")
+        let helper: AppIdentifier = .bundleID("com.example.app.helper")
+        #expect(wl.policy(for: [parent, helper]) == nil)
+        wl.setPolicy(.allowUpTo(seconds: 900), for: parent)
+        wl.setPolicy(.allowUpTo(seconds: 1800), for: helper)
+        #expect(wl.policy(for: [parent, helper]) == .allowUpTo(seconds: 1800))
+        wl.setPolicy(.alwaysAllow, for: helper)
+        #expect(wl.policy(for: [parent, helper]) == .alwaysAllow)
+    }
+
+    @Test func editingParentPolicyReplacesLegacyHelperExemptions() {
+        let defaults = freshDefaults()
+        let wl = Whitelist(defaults: defaults)
+        let parent: AppIdentifier = .bundleID("com.example.app")
+        let helper: AppIdentifier = .bundleID("com.example.app.helper")
+        wl.setPolicy(.alwaysAllow, for: helper)
+        wl.setPolicy(.allowUpTo(seconds: 900), for: parent, replacing: [helper])
+        #expect(wl.policy(for: [parent, helper]) == .allowUpTo(seconds: 900))
+        #expect(!wl.contains(helper))
+        wl.setPolicy(nil, for: parent, replacing: [helper])
+        #expect(wl.policy(for: [parent, helper]) == nil)
+        #expect(Whitelist(defaults: defaults).policies.isEmpty)
+    }
 }
