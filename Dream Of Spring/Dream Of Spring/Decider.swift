@@ -10,13 +10,16 @@ nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     /// True when any process is capturing from a camera or microphone. A
     /// forced sleep would kill the live call/recording, and the processes
     /// holding the real keep-awake assertions for calls are daemons the
-    /// whitelist can never match — so this vetoes enforcement outright.
+    /// whitelist can never match. This vetoes normal enforcement; battery
+    /// reserve deadlines still take precedence.
     var isCaptureActive: Bool
     var secondsSinceLastSleepAttempt: TimeInterval
     var isPaused: Bool
     /// Shared system-wide deadline, including whitelist exemptions and grace.
     var enforcementDeadlineSeconds: TimeInterval? = nil
     var isMeetingProtected: Bool = false
+    var batteryIdleSeconds: TimeInterval = 0
+    var batteryIdleLimitSeconds: TimeInterval? = nil
 }
 
 nonisolated enum EnforcerAction: Equatable, Sendable {
@@ -32,11 +35,14 @@ nonisolated enum Decider {
     static let cooldownSeconds: TimeInterval = 120
 
     static func decide(_ s: EnforcerSnapshot) -> EnforcerAction {
+        if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
+        if let limit = s.batteryIdleLimitSeconds, s.batteryIdleSeconds >= limit {
+            return .requestSleep
+        }
         if s.isPaused { return .doNothing }
         if s.configuredTimeoutSeconds == 0 { return .doNothing }
         if s.isCaptureActive || s.isMeetingProtected { return .doNothing }
         if !s.hasActiveBlocker { return .doNothing }
-        if s.secondsSinceLastSleepAttempt < cooldownSeconds { return .doNothing }
         let deadline = s.enforcementDeadlineSeconds ?? (s.configuredTimeoutSeconds + graceSeconds)
         if !deadline.isFinite || s.idleSeconds < deadline { return .doNothing }
         return .requestSleep

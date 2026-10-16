@@ -9,7 +9,17 @@ struct MenuContent: View {
     var body: some View {
         Text("Idle: \(format(seconds: enforcer.idleSeconds))")
         Text(timerLine)
+        if let battery = enforcer.battery {
+            Text("Battery: \(Int(battery.percentage.rounded()))%\(battery.isOnBatteryPower ? "" : " (external power)")")
+        }
+        if enforcer.batteryPlan != nil {
+            Text("Preserving a \(Int(enforcer.batteryPreferences.reservePercentage))% reserve")
+            Text("Human interaction resets the battery allowance")
+        }
         Text(statusLine)
+        if enforcer.isCaptureProtected && enforcer.batteryIdleLimitSeconds == nil {
+            Text("Capture wait started by: \(enforcer.lastCaptureResetReason)")
+        }
 
         Divider()
         if enforcer.blockers.isEmpty {
@@ -65,6 +75,37 @@ struct MenuContent: View {
         }
 
         Divider()
+        Menu("Battery Protection") {
+            Toggle("Preserve battery when unattended", isOn: Binding(
+                get: { enforcer.batteryPreferences.isEnabled },
+                set: { enforcer.batteryPreferences.isEnabled = $0; enforcer.batterySettingsChanged() }
+            ))
+            Picker("Reserve target", selection: Binding(
+                get: { enforcer.batteryPreferences.reservePercentage },
+                set: { enforcer.batteryPreferences.setReservePercentage($0); enforcer.batterySettingsChanged() }
+            )) {
+                ForEach([15.0, 20.0, 25.0, 30.0], id: \.self) { value in
+                    Text("\(Int(value))%\(value == 20 ? " (recommended)" : "")").tag(value)
+                }
+            }
+            .disabled(!enforcer.batteryPreferences.isEnabled)
+            Divider()
+            Text("On battery, at \(Int(enforcer.batteryPreferences.reservePercentage + 10))%: up to 30 min unattended")
+            Text("At the reserve target: 10 min · At 10%: 3 min · At 5%: 1 min")
+            Text("Faster drain can shorten the 30-minute allowance")
+            Text("Limits override pauses, whitelists, and calls")
+            if let rate = enforcer.batteryDrainPerHour {
+                Divider()
+                Text("Recent drain: ~\(String(format: "%.1f", rate)) percentage points/hour")
+            }
+            if let plan = enforcer.batteryPlan {
+                Text("Without interaction: \(format(seconds: plan.remainingSeconds)) remaining")
+                if plan.reason == .approachingReserve {
+                    Text("Allowance shortened to protect your reserve")
+                }
+            }
+        }
+
         Toggle("Launch at Login", isOn: Binding(
             get: { launchAtLogin.isEnabled },
             set: { _ in launchAtLogin.toggle() }
@@ -77,6 +118,10 @@ struct MenuContent: View {
 
         Divider()
         Text("Version \(appVersion)")
+        Button("Copy Sleep Diagnostics") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(enforcer.diagnostics, forType: .string)
+        }
         Button("Quit Dream Of Spring") {
             NSApplication.shared.terminate(nil)
         }
@@ -93,6 +138,14 @@ struct MenuContent: View {
     }
 
     private var statusLine: String {
+        if enforcer.batteryPlan != nil, let remaining = enforcer.effectiveSleepRemainingSeconds {
+            if enforcer.lastActuatorFailed {
+                return "Status: ⚠ last sleep attempt failed (see Console.app)"
+            }
+            return remaining > 0
+                ? "Status: reserve protection — sleep in \(format(seconds: remaining))"
+                : "Status: battery protection — requesting sleep"
+        }
         // Paused / dormant / on-a-call are the truthful state when the
         // enforcer isn't acting, so they take priority over a (possibly
         // stale) failure flag.
@@ -122,10 +175,10 @@ struct MenuContent: View {
             return "Status: capture activity unavailable — won't force sleep"
         }
         if enforcer.isCaptureProtected {
-            return "Status: waiting for camera and microphone to stay inactive"
+            return "Status: camera and microphone inactive — safety wait \(format(seconds: enforcer.captureQuietSecondsRemaining))"
         }
         if enforcer.isMeetingProtected {
-            return "Status: waiting for meeting activity to stay inactive"
+            return "Status: meeting activity inactive — safety wait \(format(seconds: enforcer.meetingQuietSecondsRemaining))"
         }
         if enforcer.lastActuatorFailed {
             return "Status: ⚠ last sleep attempt failed (see Console.app)"

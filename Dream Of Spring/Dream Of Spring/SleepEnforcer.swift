@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import os
+import Darwin
 
 @MainActor
 @Observable
@@ -11,9 +12,15 @@ final class SleepEnforcer {
     private(set) var configuredTimeoutSeconds: TimeInterval = 0
     private(set) var hasValidSettings = false
     private(set) var powerSource: String = ""
+    private(set) var battery: BatteryState?
+    private var batteryProtection = BatteryProtection()
+    var batteryPlan: BatteryPlan? { batteryProtection.plan }
+    var batteryIdleLimitSeconds: TimeInterval? { batteryPlan?.idleLimitSeconds }
+    var batteryDrainPerHour: Double? { batteryProtection.drainPerHour }
+    let batteryPreferences: BatteryPreferences
     private(set) var blockers: [Blocker] = []
     /// True when any process is capturing from the camera / microphone —
-    /// a live call or recording. Either one vetoes forced sleep globally.
+    /// a live call or recording. Battery reserve protection can override this.
     private(set) var cameraActivity: ActivityState = .unknown
     private(set) var microphoneActivity: ActivityState = .unknown
     private(set) var isCaptureProtected = true
@@ -21,6 +28,11 @@ final class SleepEnforcer {
     var microphoneInUse: Bool { microphoneActivity == .active }
     private var captureClearance = ActivityClearance()
     private var meetingClearance = ActivityClearance()
+    var captureQuietSecondsRemaining: TimeInterval { captureClearance.remainingSeconds }
+    var meetingQuietSecondsRemaining: TimeInterval { meetingClearance.remainingSeconds }
+    private(set) var lastCaptureResetReason = "App startup"
+    private(set) var lastCaptureResetAt: Date?
+    private(set) var lastSampleAt: Date?
     private(set) var meetingActivity: ActivityState = .unknown
     private(set) var isMeetingProtected = true
     private let uptime: @MainActor () -> TimeInterval
@@ -39,12 +51,19 @@ final class SleepEnforcer {
     private let readInputs: @MainActor () -> EnforcerReadings
     private let requestSleep: @MainActor () -> Bool
 
-    private static let pollInterval: Duration = .seconds(30)
+    private let startAutomatically: Bool
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var powerSourceObserver: PowerSourceObserver?
+    @ObservationIgnored private var warningController: BatteryWarningController?
+    private var latestInputs: EnforcerReadings?
+    private var lastFullSampleUptime: TimeInterval = 0
+    private var isSleeping = false
 
     init(
         whitelist: Whitelist? = nil,
+        batteryPreferences: BatteryPreferences? = nil,
         startAutomatically: Bool = true,
-        uptime: @MainActor @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        uptime: @MainActor @escaping () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000 },
         wallClock: @MainActor @escaping () -> Date = { Date() },
         readInputs: @MainActor @escaping () -> EnforcerReadings = { EnforcerReadings.read() },
         requestSleep: @MainActor @escaping () -> Bool = {
@@ -53,19 +72,18 @@ final class SleepEnforcer {
         }
     ) {
         self.whitelist = whitelist ?? Whitelist()
+        self.batteryPreferences = batteryPreferences ?? BatteryPreferences()
         self.requestSleep = requestSleep
         self.readInputs = readInputs
         self.uptime = uptime
         self.wallClock = wallClock
+        self.startAutomatically = startAutomatically
         guard startAutomatically else { return }
+        warningController = BatteryWarningController()
+        powerSourceObserver = PowerSourceObserver(onChange: { [weak self] in self?.tick() },
+            onSleep: { [weak self] in self?.prepareForSleep() },
+            onWake: { [weak self] in self?.didWake() })
         tick()
-        Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: SleepEnforcer.pollInterval) } catch { return }
-                guard let self else { return }
-                self.tick()
-            }
-        }
     }
 
     /// Blockers whose whitelist policy doesn't (yet) exempt them given the
@@ -88,7 +106,24 @@ final class SleepEnforcer {
         whitelist.sleepDeadline(for: blockers.flatMap(\.policyIdentifiers), configuredTimeout: configuredTimeoutSeconds)
     }
 
+    var effectiveSleepRemainingSeconds: TimeInterval? {
+        let batteryRemaining = batteryPlan?.remainingSeconds
+        guard !isPaused, hasValidSettings, configuredTimeoutSeconds > 0,
+              !isCaptureProtected, !isMeetingProtected,
+              let normal = sleepDeadlineSeconds, normal.isFinite else { return batteryRemaining }
+        return min(batteryRemaining ?? .infinity, max(0, normal - idleSeconds))
+    }
+
+    var batteryWarningPlan: BatteryPlan? {
+        guard let plan = batteryPlan,
+              effectiveSleepRemainingSeconds == plan.remainingSeconds else { return nil }
+        // Don't promise a battery countdown when the ordinary sleep deadline
+        // will act sooner. Those earlier settings still take precedence.
+        return plan
+    }
+
     private func isActive(blocker: Blocker) -> Bool {
+        if batteryPlan?.remainingSeconds == 0 { return true }
         guard let deadline = whitelist.sleepDeadline(
             for: blocker.policyIdentifiers, configuredTimeout: configuredTimeoutSeconds
         ) else { return false }
@@ -112,35 +147,78 @@ final class SleepEnforcer {
     }
 
     func tick() {
+        guard !isSleeping else { return }
+        let inputs = readInputs()
+        lastFullSampleUptime = uptime()
+        evaluate(inputs, fullSample: true)
+    }
+
+    func batterySettingsChanged() { tick() }
+
+    func prepareForSleep() {
+        isSleeping = true
+        pollTask?.cancel()
+        warningController?.hide()
+        batteryProtection.resetDrainEstimate()
+    }
+
+    func didWake() {
+        isSleeping = false
+        // Preserve the interaction timestamp and deadline across every wake.
+        batteryProtection.resetDrainEstimate()
+        tick()
+    }
+
+    private func evaluate(_ inputs: EnforcerReadings, fullSample: Bool) {
         // Auto-resume if a timed pause has elapsed.
         if isPaused, let until = pausedUntil, wallClock() >= until {
             resume()
         }
 
-        let inputs = readInputs()
+        latestInputs = inputs
         idleSeconds = inputs.idleSeconds
         hasValidSettings = inputs.settings != nil
         configuredTimeoutSeconds = inputs.settings?.timeoutSeconds ?? 0
         powerSource = inputs.settings?.source ?? ""
+        battery = inputs.battery
+        batteryProtection.update(battery: battery, idle: inputs.humanIdleSeconds ?? idleSeconds,
+                                 inputCount: inputs.humanInputCount, now: uptime(),
+                                 enabled: batteryPreferences.isEnabled, reserve: batteryPreferences.reservePercentage)
         blockers = inputs.blockers
         cameraActivity = inputs.cameraActivity
         microphoneActivity = inputs.microphoneActivity
+        lastSampleAt = wallClock()
+        let captureState = ActivityState.combined([cameraActivity, microphoneActivity])
+        if fullSample && captureState != .inactive {
+            var reasons: [String] = []
+            if cameraActivity != .inactive {
+                reasons.append(cameraActivity == .active ? "Camera in use" : "Camera status read failed")
+            }
+            if microphoneActivity != .inactive {
+                reasons.append(microphoneActivity == .active ? "Microphone in use" : "Microphone status read failed")
+            }
+            lastCaptureResetReason = reasons.joined(separator: "; ")
+            lastCaptureResetAt = lastSampleAt
+            Self.logger.notice("Capture quiet window reset: \(self.lastCaptureResetReason, privacy: .public)")
+        }
         let sampleUptime = uptime()
         meetingActivity = inputs.meetingActivity
         isMeetingProtected = !meetingClearance.permitsSleep(state: meetingActivity, uptime: sampleUptime)
         isCaptureProtected = !captureClearance.permitsSleep(
-            state: .combined([cameraActivity, microphoneActivity]), uptime: sampleUptime)
+            state: captureState, uptime: sampleUptime)
 
         let active = activeBlockers
         let snapshot = EnforcerSnapshot(
             idleSeconds: idleSeconds,
             configuredTimeoutSeconds: configuredTimeoutSeconds,
-            hasActiveBlocker: !blockers.isEmpty,
+            hasActiveBlocker: fullSample && !blockers.isEmpty,
             isCaptureActive: isCaptureProtected,
             secondsSinceLastSleepAttempt: secondsSinceLastSleepAttempt,
             isPaused: isPaused,
             enforcementDeadlineSeconds: sleepDeadlineSeconds,
-            isMeetingProtected: isMeetingProtected
+            isMeetingProtected: isMeetingProtected,
+            batteryIdleSeconds: batteryPlan?.idleSeconds ?? 0,
+            batteryIdleLimitSeconds: batteryIdleLimitSeconds
         )
         lastDecision = Decider.decide(snapshot)
         if lastDecision == .requestSleep {
@@ -148,16 +226,71 @@ final class SleepEnforcer {
             lastActuatorFailed = !requestSleep()
             lastSleepAttemptAt = wallClock()
             lastSleepAttemptUptime = uptime()
-        } else if active.isEmpty {
+        } else if active.isEmpty && batteryPlan?.remainingSeconds != 0 {
             // Nothing is keeping the Mac awake any more (user returned, or the
             // blocker released its assertion), so a prior failure is stale —
             // clear it rather than showing the warning until the next attempt.
             lastActuatorFailed = false
+        }
+        warningController?.update(plan: batteryWarningPlan, battery: battery, reserve: batteryPreferences.reservePercentage)
+        scheduleNextPoll()
+    }
+
+    /// Shorten the final poll to the battery deadline; don't add the normal
+    /// 15-second grace or a full polling interval to either battery cap.
+    var nextPollSeconds: TimeInterval {
+        guard let plan = batteryPlan else { return 30 }
+        let remaining = plan.remainingSeconds
+        if remaining > 60 { return min(30, remaining - 60) }
+        if remaining > 0 { return min(1, remaining) }
+        let cooldown = Decider.cooldownSeconds - secondsSinceLastSleepAttempt
+        return cooldown > 0 ? min(30, cooldown) : 30
+    }
+
+    private func scheduleNextPoll() {
+        guard startAutomatically, !isSleeping else { return }
+        pollTask?.cancel()
+        let delay = nextPollSeconds
+        pollTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self else { return }
+            if self.uptime() - self.lastFullSampleUptime >= 30 || self.latestInputs == nil {
+                self.tick()
+            } else if let inputs = self.latestInputs {
+                self.evaluate(inputs.refreshingBatteryAndInput(), fullSample: false)
+            }
         }
     }
 
     private var secondsSinceLastSleepAttempt: TimeInterval {
         guard let last = lastSleepAttemptUptime else { return .greatestFiniteMagnitude }
         return uptime() - last
+    }
+
+    /// Uses cached samples so copying diagnostics cannot trigger enforcement.
+    var diagnostics: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let deadline = sleepDeadlineSeconds.map { String($0) } ?? "none"
+        let blockerLines = blockers.map { "\($0.displayName) (PID \($0.pid)): \($0.reason)" }.joined(separator: "\n")
+        return """
+        Dream Of Spring \(version)
+        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Last sample: \(lastSampleAt?.ISO8601Format() ?? "none")
+        Paused: \(isPaused)
+        Power settings valid: \(hasValidSettings); source: \(powerSource)
+        Battery: \(battery.map { String($0.percentage) + "%; on battery: " + String($0.isOnBatteryPower) } ?? "unavailable"); idle cap: \(batteryIdleLimitSeconds.map { String($0) + "s" } ?? "none")
+        Reserve protection: \(batteryPreferences.isEnabled); target: \(batteryPreferences.reservePercentage)%
+        Drain: \(batteryDrainPerHour.map { String($0) + " percentage points/hour" } ?? "estimating"); reason: \(batteryPlan?.reason.rawValue ?? "none")
+        Human idle: \(batteryPlan?.idleSeconds ?? 0)s; battery time remaining: \(batteryPlan?.remainingSeconds ?? 0)s
+        Idle: \(idleSeconds)s; configured timeout: \(configuredTimeoutSeconds)s; enforcement deadline: \(deadline)s
+        Camera: \(cameraActivity.rawValue); microphone: \(microphoneActivity.rawValue)
+        Capture protected: \(isCaptureProtected); quiet time remaining: \(captureQuietSecondsRemaining)s
+        Last capture wait reset: \(lastCaptureResetReason) at \(lastCaptureResetAt?.ISO8601Format() ?? "startup")
+        Meeting: \(meetingActivity.rawValue); protected: \(isMeetingProtected); quiet time remaining: \(meetingQuietSecondsRemaining)s
+        Decision: \(lastDecision)
+        Last sleep request: \(lastSleepAttemptAt?.ISO8601Format() ?? "none"); failed: \(lastActuatorFailed)
+        Blockers:
+        \(blockerLines.isEmpty ? "none" : blockerLines)
+        """
     }
 }

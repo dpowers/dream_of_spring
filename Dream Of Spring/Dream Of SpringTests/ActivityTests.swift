@@ -29,6 +29,47 @@ struct ActivityTests {
         #expect(!permitsSleep(state: .active, uptime: 271))
         #expect(!permitsSleep(state: .inactive, uptime: 300))
     }
+    @Test func countdownRestartsOnReadFailureAndClockRollback() {
+        var clearance = ActivityClearance()
+        func permitsSleep(state: ActivityState, uptime: TimeInterval) -> Bool {
+            clearance.permitsSleep(state: state, uptime: uptime)
+        }
+        #expect(!permitsSleep(state: .inactive, uptime: 100))
+        #expect(!permitsSleep(state: .inactive, uptime: 190))
+        #expect(clearance.remainingSeconds == 30)
+        #expect(!permitsSleep(state: .unknown, uptime: 200))
+        #expect(clearance.remainingSeconds == 120)
+        #expect(!permitsSleep(state: .inactive, uptime: 210))
+        #expect(!permitsSleep(state: .inactive, uptime: 10))
+        #expect(clearance.remainingSeconds == 120)
+        #expect(permitsSleep(state: .inactive, uptime: 130))
+        #expect(clearance.remainingSeconds == 0)
+    }
+
+    @Test @MainActor func intermittentFailureRemainsVisibleDuringQuietWait() {
+        let sensors = TestSensors(EnforcerReadings(idleSeconds: 900,
+            settings: PowerSettings(timeoutSeconds: 600, source: "AC Power"),
+            blockers: [Blocker(pid: 1, identifier: .bundleID("browser"), displayName: "Browser", reason: "Playback")]))
+        let wl = Whitelist(defaults: UserDefaults(suiteName: "ActivityTests." + UUID().uuidString)!)
+        let enforcer = SleepEnforcer(whitelist: wl, startAutomatically: false, uptime: { sensors.uptime },
+            wallClock: { Date(timeIntervalSince1970: sensors.uptime) },
+            readInputs: { sensors.inputs }, requestSleep: { sensors.sleepCalls += 1; return true })
+        enforcer.tick()
+        sensors.inputs.cameraActivity = .unknown; sensors.uptime = 90; enforcer.tick()
+        sensors.inputs.cameraActivity = .inactive; sensors.uptime = 120; enforcer.tick()
+        sensors.uptime = 180; enforcer.tick()
+        #expect(enforcer.cameraActivity == .inactive)
+        #expect(enforcer.captureQuietSecondsRemaining == 60)
+        #expect(enforcer.lastCaptureResetReason == "Camera status read failed")
+        #expect(enforcer.lastCaptureResetAt == Date(timeIntervalSince1970: 90))
+        #expect(enforcer.diagnostics.contains("Camera status read failed"))
+        #expect(enforcer.diagnostics.contains("quiet time remaining: 60.0s"))
+        #expect(sensors.sleepCalls == 0)
+        sensors.uptime = 240; enforcer.tick()
+        #expect(!enforcer.isCaptureProtected)
+        #expect(sensors.sleepCalls == 1)
+    }
+
     @Test @MainActor func deviceSwitchCannotImmediatelySleep() {
         let sensors = TestSensors(EnforcerReadings(idleSeconds: 900,
             settings: PowerSettings(timeoutSeconds: 600, source: "AC Power"),

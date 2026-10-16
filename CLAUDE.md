@@ -11,6 +11,46 @@ It is **not** a "sleep now" button. The user's configured idle timeout is
 respected — the app only steps in when that timeout has elapsed and something
 else is keeping the Mac awake.
 
+Battery reserve protection is an explicit exception. It is enabled by default
+with a 20% reserve target (configurable from 15–30% in the menu). On internal
+battery power, the default maximum times without human input are:
+
+- Above 20%, through 30%: 30 minutes, shortened by estimated time to the reserve.
+- Above 10%, through 20%: 10 minutes.
+- Above 5%, through 10%: 3 minutes.
+- At or below 5%: 1 minute.
+
+Changing the reserve shifts the first two bands; the 10% and 5% emergency bands
+stay fixed. The reserve is a best-effort target, not a guaranteed charge floor.
+Adaptive estimates retain at least ten minutes of utility after interaction.
+They require three minutes of charge samples and a drop of at least one point;
+the faster of the recent three-minute and rolling ten-minute rates wins. Charge
+increases, external power, missing data, and gaps over 90 seconds reset the
+estimate. Within an unattended episode an estimate can only tighten a deadline.
+
+These limits override Never, pauses, whitelist policies, capture, meeting
+protection, and the absence of visible app assertions. Shorter normal sleep
+deadlines still apply. Disabling protection or switching to AC restores normal
+rules. An unavailable battery reading suppresses the override until recovery.
+`BatteryPreferences` persists the switch and target; `BatteryProtection` owns
+the pure budget, drain estimator, and human-activity tracker.
+
+Hardware input counts and idle durations come from Quartz's HID event-state
+table, without event taps or reading key contents. The battery timer uses a
+continuous monotonic clock that includes sleep. While the app runs, only a new
+hardware input count renews the allowance; background wake and HID idle-counter
+resets cannot do so. This distinguishes ordinary synthetic session events, not
+malicious software impersonating hardware. Remote-control tools may report
+input differently. Normal enforcement still uses the existing HIDIdleTime.
+
+The last minute shows a nonactivating warning panel over other applications.
+Keyboard/pointer input dismisses it and renews the allowance. It adds no grace:
+startup or a charge drop past an already-expired deadline can request sleep
+immediately. Power-source notifications and wake notifications trigger fresh
+reads; full polling runs every 30 seconds, with lightweight battery/input polls
+each second during the warning. The existing 120-second actuator retry cooldown
+still applies if macOS does not stay asleep. Tests never invoke the real actuator.
+
 The implementation in v1 follows the phases described in `PLAN.md`. App
 Sandbox is **off** (personal-use, not Mac App Store); the actuator calls
 `IOPMSleepSystem` directly from the GUI process — no privileged helper.

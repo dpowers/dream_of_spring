@@ -4,7 +4,7 @@
 //
 import Foundation
 
-nonisolated enum ActivityState: Equatable, Sendable {
+nonisolated enum ActivityState: String, Equatable, Sendable {
     case active, inactive, unknown
 
     static func sample(status: Int32, value: UInt32, bytes: UInt32) -> Self {
@@ -24,13 +24,16 @@ nonisolated enum ActivityState: Equatable, Sendable {
 nonisolated struct ActivityClearance {
     static let quietSeconds: TimeInterval = 120
     private var inactiveSince: TimeInterval?
+    private(set) var remainingSeconds: TimeInterval = quietSeconds
 
     mutating func permitsSleep(state: ActivityState, uptime: TimeInterval) -> Bool {
         guard state == .inactive else {
             inactiveSince = nil
+            remainingSeconds = Self.quietSeconds
             return false
         }
         if inactiveSince == nil || uptime < inactiveSince! { inactiveSince = uptime }
-        return uptime - inactiveSince! >= Self.quietSeconds
+        remainingSeconds = max(0, Self.quietSeconds - (uptime - inactiveSince!))
+        return remainingSeconds == 0
     }
 }

@@ -14,6 +14,7 @@ struct Dream_Of_SpringApp: App {
     }
 
     private var iconName: String {
+        if enforcer.batteryIdleLimitSeconds != nil { return "moon.zzz.fill" }
         if enforcer.isPaused { return "moon" }
         if enforcer.nonAlwaysAllowedBlockers.isEmpty { return "moon.zzz" }
         return "moon.zzz.fill"

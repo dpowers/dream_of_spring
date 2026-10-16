@@ -81,6 +81,21 @@ enum PowerInfo {
         return TimeInterval(nanoseconds) / 1_000_000_000
     }
 
+    /// Hardware event state excludes ordinary session-posted synthetic input.
+    /// Counts avoid interpreting power-management idle resets as human input.
+    /// No event tap, key contents, or input-monitoring permission is needed.
+    static func humanActivity() -> (count: UInt64, idle: TimeInterval) {
+        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .mouseMoved,
+            .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+            .otherMouseDown, .otherMouseUp, .leftMouseDragged, .rightMouseDragged,
+            .otherMouseDragged, .scrollWheel, .tabletPointer, .tabletProximity]
+        let count = types.reduce(UInt64(0)) {
+            $0 + UInt64(CGEventSource.counterForEventType(.hidSystemState, eventType: $1))
+        }
+        let idle = types.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? 0
+        return (count, idle)
+    }
+
     /// Reads the currently-active system-sleep timer in seconds. Returns 0 if
     /// the user explicitly chose "Never", and `nil` if reading failed — the
     /// caller must suppress enforcement until a fresh read succeeds.
@@ -135,6 +150,25 @@ enum PowerInfo {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return nil }
         if let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() {
             return providing as String
+        }
+        return nil
+    }
+
+    /// Read charge and power source from one snapshot, independently of pmset.
+    static func batteryState() -> BatteryState? {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue(),
+              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef]
+        else { return nil }
+        for source in sources {
+            guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
+                  description["Type"] as? String == "InternalBattery",
+                  description["Is Present"] as? Bool == true,
+                  let current = description["Current Capacity"] as? NSNumber,
+                  let maximum = description["Max Capacity"] as? NSNumber else { continue }
+            return BatteryState.validated(currentCapacity: current.doubleValue,
+                                          maxCapacity: maximum.doubleValue,
+                                          isOnBatteryPower: providing as String == "Battery Power")
         }
         return nil
     }

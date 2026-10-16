@@ -11,6 +11,9 @@ struct EnforcerReadings {
     var cameraActivity: ActivityState = .inactive
     var microphoneActivity: ActivityState = .inactive
     var meetingActivity: ActivityState = .inactive
+    var battery: BatteryState? = nil
+    var humanInputCount: UInt64? = nil
+    var humanIdleSeconds: TimeInterval? = nil
 
     static func read() -> Self {
         let settings = PowerInfo.activeSettings()
@@ -18,10 +21,25 @@ struct EnforcerReadings {
         let meeting = MeetingActivity.read(assertionReasons: assertions?.reasons)
         let camera = CaptureActivity.cameraInUse()
         let microphone = CaptureActivity.microphoneInUse()
+        let battery = PowerInfo.batteryState()
+        let human = PowerInfo.humanActivity()
         // Read idle last so the pmset subprocess cannot leave an old HID sample.
         return Self(idleSeconds: PowerInfo.userIdleSeconds(), settings: settings,
                     blockers: assertions?.blockers ?? [], cameraActivity: camera,
-                    microphoneActivity: microphone, meetingActivity: meeting)
+                    microphoneActivity: microphone, meetingActivity: meeting, battery: battery,
+                    humanInputCount: human.count, humanIdleSeconds: human.idle)
+    }
+
+    /// Countdown polling avoids invoking pmset and enumerating capture devices
+    /// every second. Normal enforcement is only evaluated on full samples.
+    func refreshingBatteryAndInput() -> Self {
+        var result = self
+        result.battery = PowerInfo.batteryState()
+        let human = PowerInfo.humanActivity()
+        result.humanInputCount = human.count
+        result.humanIdleSeconds = human.idle
+        result.idleSeconds = PowerInfo.userIdleSeconds()
+        return result
     }
 }
 
