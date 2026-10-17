@@ -139,6 +139,7 @@ extension AppIdentifier {
         switch self {
         case .bundleID(let s): return "0\t\(s)"
         case .processName(let s): return "1\t\(s)"
+        case .executablePath(let s): return "2\t\(s)"
         }
     }
 }

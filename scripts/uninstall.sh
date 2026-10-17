@@ -8,7 +8,7 @@ INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 APP="$INSTALL_DIR/Dream Of Spring.app"
 
 echo "==> Quitting any running instance…"
-pkill -x "Dream Of Spring" 2>/dev/null || true
+bash "$(dirname "$0")/quit-app.sh"
 
 if [[ -d "$APP" ]]; then
     echo "==> Removing $APP"

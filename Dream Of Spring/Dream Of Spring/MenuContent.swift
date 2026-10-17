@@ -17,6 +17,12 @@ struct MenuContent: View {
             Text("Human interaction resets the battery allowance")
         }
         Text(statusLine)
+        if !enforcer.closedLidPreferences.permissions.isEmpty {
+            Text(enforcer.closedLidStatus)
+            if enforcer.closedLidLeaseSeconds > 0 || enforcer.closedLidController.isActive {
+                Text("To sleep during protected work, choose Sleep Now here.")
+            }
+        }
         if enforcer.isCaptureProtected && enforcer.batteryIdleLimitSeconds == nil {
             Text("Capture wait started by: \(enforcer.lastCaptureResetReason)")
         }
@@ -28,7 +34,7 @@ struct MenuContent: View {
             Text("Blocking sleep:")
             ForEach(enforcer.blockers) { blocker in
                 BlockerPolicyMenu(
-                    whitelist: enforcer.whitelist,
+                    enforcer: enforcer,
                     identifier: blocker.identifier,
                     alternateIdentifiers: blocker.alternateIdentifiers,
                     label: "\(marker(for: enforcer.whitelist.policy(for: blocker.policyIdentifiers)))  \(blocker.displayName) — \(blocker.reason)"
@@ -38,31 +44,32 @@ struct MenuContent: View {
 
         Divider()
         if enforcer.isPaused {
-            Button("Resume Dream Of Spring") {
+            Button("Resume forced sleep") {
                 enforcer.resume()
             }
         } else {
-            Menu("Pause") {
+            Menu("Pause forced sleep") {
                 Button("Pause for 15 minutes") { enforcer.pause(for: 15 * 60) }
                 Button("Pause for 1 hour") { enforcer.pause(for: 60 * 60) }
                 Button("Pause until I resume") { enforcer.pause(for: nil) }
             }
         }
 
-        Menu("Whitelist") {
-            if enforcer.whitelist.policies.isEmpty {
-                Text("No apps whitelisted")
+        Menu("App policies") {
+            let savedIDs = Set(enforcer.whitelist.policies.keys).union(enforcer.closedLidPreferences.permissions.keys)
+            if savedIDs.isEmpty {
+                Text("No saved app policies")
             } else {
                 // Resolve displayName once per id; `displayName` does a linear
                 // scan of running applications, so doing it inside a sort
                 // comparator would be O(N log N) scans.
-                let sorted = enforcer.whitelist.policies.keys
+                let sorted = savedIDs
                     .map { (id: $0, name: $0.displayName) }
                     .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                 ForEach(sorted, id: \.id) { entry in
                     let policy = enforcer.whitelist.policy(for: entry.id)
                     BlockerPolicyMenu(
-                        whitelist: enforcer.whitelist,
+                        enforcer: enforcer,
                         identifier: entry.id,
                         label: "\(marker(for: policy))  \(entry.name) \(policySuffix(for: policy))"
                     )
@@ -73,6 +80,18 @@ struct MenuContent: View {
                 addAppToWhitelistFromPicker()
             }
         }
+
+        Menu("Closed-lid support") {
+            Text(enforcer.closedLidController.message)
+            Button(enforcer.closedLidController.needsApproval ? "Approve in System Settings…" : "Enable closed-lid support…") {
+                enforcer.closedLidController.enableSupport()
+                enforcer.tick()
+            }
+            Text("Allow programs individually under App policies.")
+            Text("Only active system-sleep assertions qualify.")
+            Text("Battery protection takes priority.")
+        }
+        Button("Sleep Now") { enforcer.sleepNow() }
 
         Divider()
         Menu("Battery Protection") {
@@ -149,6 +168,9 @@ struct MenuContent: View {
         // Paused / dormant / on-a-call are the truthful state when the
         // enforcer isn't acting, so they take priority over a (possibly
         // stale) failure flag.
+        if enforcer.closedLidLeaseSeconds > 0 {
+            return "Status: allowed app is requesting continued background work"
+        }
         if enforcer.isPaused {
             if let until = enforcer.pausedUntil {
                 let remaining = max(0, until.timeIntervalSinceNow)
@@ -258,25 +280,52 @@ struct MenuContent: View {
 }
 
 private struct BlockerPolicyMenu: View {
-    let whitelist: Whitelist
+    let enforcer: SleepEnforcer
+    private var whitelist: Whitelist { enforcer.whitelist }
     let identifier: AppIdentifier
     var alternateIdentifiers: [AppIdentifier] = []
     let label: String
 
     var body: some View {
         Menu {
-            let current = whitelist.policy(for: [identifier] + alternateIdentifiers)
+            let identifiers = [identifier] + alternateIdentifiers
+            let current = whitelist.policy(for: identifiers)
+            let lidPermission = enforcer.closedLidPreferences.permission(for: identifiers)
+            Toggle("Allow keeping awake with lid closed", isOn: Binding(
+                get: { lidPermission != nil },
+                set: { enabled in
+                    enforcer.closedLidPreferences.set(enabled ? ClosedLidPermission() : nil,
+                        for: identifier, replacing: alternateIdentifiers)
+                    enforcer.closedLidSettingsChanged()
+                }
+            ))
+            if let lidPermission {
+                Toggle("Only on external power", isOn: Binding(
+                    get: { lidPermission.onlyOnExternalPower },
+                    set: { externalOnly in
+                        enforcer.closedLidPreferences.set(ClosedLidPermission(onlyOnExternalPower: externalOnly),
+                            for: identifier, replacing: alternateIdentifiers)
+                        enforcer.closedLidSettingsChanged()
+                    }
+                ))
+                Text("While this program holds a system-sleep assertion.")
+                Text("Battery protection still applies.")
+            }
+            Divider()
             Button(check(current == nil) + "Don't whitelist") {
                 whitelist.setPolicy(nil, for: identifier, replacing: alternateIdentifiers)
+                enforcer.tick()
             }
             Button(check(current == .alwaysAllow) + "Always allow") {
                 whitelist.setPolicy(.alwaysAllow, for: identifier, replacing: alternateIdentifiers)
+                enforcer.tick()
             }
             Divider()
             ForEach(WhitelistPreset.allowUpToOptions, id: \.label) { preset in
                 let isSelected = current == .allowUpTo(seconds: preset.seconds)
                 Button(check(isSelected) + "Allow up to \(preset.label)") {
                     whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier, replacing: alternateIdentifiers)
+                    enforcer.tick()
                 }
             }
         } label: {

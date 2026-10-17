@@ -40,7 +40,7 @@ if [[ ! -d "$BUILT_APP" ]]; then
 fi
 
 echo "==> Quitting any running instance…"
-pkill -x "Dream Of Spring" 2>/dev/null || true
+bash "$(dirname "$0")/quit-app.sh"
 
 DEST="$INSTALL_DIR/$APP_NAME"
 if [[ -d "$DEST" ]]; then

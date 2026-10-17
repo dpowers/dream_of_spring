@@ -99,6 +99,15 @@ if ! grep -q "Developer ID Application" <<< "$SIG_AUTHORITY"; then
     exit 1
 fi
 
+# The daemon is built by a script rather than a nested Xcode target. Explicitly
+# re-sign it with the exported Developer ID and secure timestamp for notarization,
+# then reseal the app while preserving its exported entitlements.
+codesign --force --options runtime --timestamp --sign "${SIG_AUTHORITY#Authority=}" \
+    "$EXPORTED_APP/Contents/MacOS/DreamOfSpringLidHelper"
+codesign --force --timestamp --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
+    --sign "${SIG_AUTHORITY#Authority=}" "$EXPORTED_APP"
+codesign --verify --deep --strict "$EXPORTED_APP"
+
 NOTARY_ZIP="$STAGE/for-notarization.zip"
 echo "==> Zipping for notarization…"
 ditto -c -k --keepParent "$EXPORTED_APP" "$NOTARY_ZIP"
@@ -126,6 +135,7 @@ mkdir -p "$PACKAGE_DIR"
 
 echo "==> Staging notarized app…"
 cp -R "$EXPORTED_APP" "$PACKAGE_DIR/"
+cp "$REPO_ROOT/scripts/quit-app.sh" "$PACKAGE_DIR/Quit-Dream-Of-Spring.sh"
 
 echo "==> Writing recipient installer (Install.command)…"
 cat > "$PACKAGE_DIR/Install.command" <<'INSTALL_EOF'
@@ -149,7 +159,7 @@ fi
 xattr -dr com.apple.quarantine "$APP_NAME" 2>/dev/null || true
 
 echo "==> Quitting any running instance…"
-pkill -x "Dream Of Spring" 2>/dev/null || true
+bash "$(dirname "$0")/Quit-Dream-Of-Spring.sh"
 
 if [[ -d "$DEST" ]]; then
     echo "==> Replacing existing $DEST"
@@ -178,7 +188,7 @@ set -euo pipefail
 DEST="/Applications/Dream Of Spring.app"
 
 echo "==> Quitting any running instance…"
-pkill -x "Dream Of Spring" 2>/dev/null || true
+bash "$(dirname "$0")/Quit-Dream-Of-Spring.sh"
 
 if [[ -d "$DEST" ]]; then
     echo "==> Removing $DEST"

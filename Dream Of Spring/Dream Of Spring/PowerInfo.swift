@@ -9,6 +9,7 @@ import os
 nonisolated enum AppIdentifier: Hashable, Codable, Sendable {
     case bundleID(String)
     case processName(String)
+    case executablePath(String)
 }
 
 extension AppIdentifier {
@@ -20,6 +21,8 @@ extension AppIdentifier {
         switch self {
         case .processName(let name):
             return name
+        case .executablePath(let path):
+            return URL(filePath: path).lastPathComponent
         case .bundleID(let bid):
             for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bid {
                 if let n = app.localizedName { return n }
@@ -46,6 +49,10 @@ struct Blocker: Identifiable, Hashable, Sendable {
     let displayName: String
     let reason: String
     var alternateIdentifiers: [AppIdentifier] = []
+    var assertionType: String = "PreventUserIdleSystemSleep"
+    var participatesInEnforcement = true
+
+    var requestsSystemSleepPrevention: Bool { ClosedLidPolicy.isSystemAssertion(assertionType) }
 
     /// Retain policies saved for helper bundle IDs before owner resolution.
     var policyIdentifiers: [AppIdentifier] { [identifier] + alternateIdentifiers }
@@ -85,15 +92,7 @@ enum PowerInfo {
     /// Counts avoid interpreting power-management idle resets as human input.
     /// No event tap, key contents, or input-monitoring permission is needed.
     static func humanActivity() -> (count: UInt64, idle: TimeInterval) {
-        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .mouseMoved,
-            .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
-            .otherMouseDown, .otherMouseUp, .leftMouseDragged, .rightMouseDragged,
-            .otherMouseDragged, .scrollWheel, .tabletPointer, .tabletProximity]
-        let count = types.reduce(UInt64(0)) {
-            $0 + UInt64(CGEventSource.counterForEventType(.hidSystemState, eventType: $1))
-        }
-        let idle = types.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? 0
-        return (count, idle)
+        PowerSafetyReadings.humanActivity()
     }
 
     /// Reads the currently-active system-sleep timer in seconds. Returns 0 if
@@ -156,26 +155,12 @@ enum PowerInfo {
 
     /// Read charge and power source from one snapshot, independently of pmset.
     static func batteryState() -> BatteryState? {
-        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue(),
-              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef]
-        else { return nil }
-        for source in sources {
-            guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
-                  description["Type"] as? String == "InternalBattery",
-                  description["Is Present"] as? Bool == true,
-                  let current = description["Current Capacity"] as? NSNumber,
-                  let maximum = description["Max Capacity"] as? NSNumber else { continue }
-            return BatteryState.validated(currentCapacity: current.doubleValue,
-                                          maxCapacity: maximum.doubleValue,
-                                          isOnBatteryPower: providing as String == "Battery Power")
-        }
-        return nil
+        PowerSafetyReadings.batteryState()
     }
 
-    /// Returns app-owned sleep-prevention assertions, including embedded
-    /// background helpers. System daemons without an owning app (`powerd`,
-    /// `sharingd`, `mDNSResponder`, etc.) remain excluded.
+    /// App-owned assertions retain their existing enforcement behavior. Also
+    /// expose standalone system-sleep assertions for explicit closed-lid
+    /// permissions; these do not become ordinary enforcement targets.
     static func assertionSnapshot() -> AssertionReadings? {
         var unmanagedDict: Unmanaged<CFDictionary>?
         guard IOPMCopyAssertionsByProcess(&unmanagedDict) == kIOReturnSuccess,
@@ -186,6 +171,7 @@ enum PowerInfo {
         var reasons: [String] = []
         for (pidNum, assertions) in raw {
             let pid = pid_t(pidNum.int32Value)
+            guard pid != getpid() else { continue }
             // Keep meeting signals before filtering to GUI apps: browser
             // helpers and conferencing daemons can own these assertions.
             for assertion in assertions {
@@ -200,12 +186,22 @@ enum PowerInfo {
                 return sleepBlockingTypes.contains(type) && level > 0
             }
             guard !matching.isEmpty else { continue }
-            guard let owner = assertionOwner(pid: pid) else { continue }
+            let owner = assertionOwner(pid: pid)
+            let executable = processExecutableURL(pid: pid)?.resolvingSymlinksInPath()
+            // Background programs can own assertions without belonging to an
+            // .app. Give them an exact executable identity, not a name match.
+            guard owner != nil || executable != nil else { continue }
+            let name = owner?.displayName ?? executable!.lastPathComponent
+            if owner == nil && ["powerd", "WindowServer", "loginwindow", "DreamOfSpringLidHelper"].contains(name) { continue }
             for a in matching {
+                let type = (a[assertionTypeKey] as? String) ?? ""
+                if owner == nil && !ClosedLidPolicy.isSystemAssertion(type) { continue }
                 let reason = (a[assertionNameKey] as? String) ?? "(unnamed)"
-                result.append(Blocker(pid: pid, identifier: .bundleID(owner.bundleID),
-                                      displayName: owner.displayName, reason: reason,
-                                      alternateIdentifiers: owner.alternateBundleIDs.map(AppIdentifier.bundleID)))
+                let identifier: AppIdentifier = owner.map { .bundleID($0.bundleID) } ?? .executablePath(executable!.path)
+                result.append(Blocker(pid: pid, identifier: identifier,
+                    displayName: name, reason: reason,
+                    alternateIdentifiers: owner?.alternateBundleIDs.map(AppIdentifier.bundleID) ?? [],
+                    assertionType: type, participatesInEnforcement: owner != nil))
             }
         }
         return AssertionReadings(blockers: result.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }, reasons: reasons)

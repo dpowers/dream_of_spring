@@ -2,14 +2,59 @@
 
 A **menu-bar–only** macOS app that enforces the user's own sleep settings by
 neutralising power-management assertions registered by other processes.
-Conceptually the inverse of Amphetamine: rather than preventing sleep, it
-prevents *other apps from preventing sleep*. The user's Energy Saver / Battery
+It also lets the user grant individual programs permission to continue with
+the lid closed, only while they hold an active system-sleep assertion. The user's Energy Saver / Battery
 "sleep when inactive for…" preference is the source of truth; Dream Of Spring's
 job is to make sure that timer actually fires.
 
-It is **not** a "sleep now" button. The user's configured idle timeout is
-respected — the app only steps in when that timeout has elapsed and something
-else is keeping the Mac awake.
+Normal enforcement respects the user's configured idle timeout. The menu also
+provides **Sleep Now**, which releases closed-lid protection before requesting
+sleep and suspends reactivation until the next hardware input.
+
+## Closed-lid protection
+
+Under **App policies** (or a current blocker), enable **Allow keeping awake with
+lid closed**. Permissions persist separately from whitelist policies; existing
+whitelists never gain this permission automatically. **Only on external power**
+defaults to on and can be disabled per program. An allowed program must hold an
+active `PreventUserIdleSystemSleep` or legacy `NoIdleSleepAssertion`. Merely
+running, display-sleep assertions, capture and meeting detection do not qualify.
+App helpers inherit the containing app's identity. Standalone programs and
+backup daemons can be selected by their exact resolved executable path; these
+additional rows do not broaden ordinary forced-sleep enforcement.
+
+`ClosedLidPreferences` stores permissions; `ClosedLidPolicy` determines eligibility.
+Permission plus an assertion vetoes ordinary enforcement, but never the battery
+deadline. Missing lid, battery or assertion readings release protection. With
+saved permissions, lightweight assertion/battery/input polling runs every two
+seconds; expensive power-settings and capture reads stay at thirty seconds.
+Check the menu for active protection before closing the lid.
+
+Actual lid-close suppression uses the privileged `LidHelper` daemon, registered
+via `SMAppService`. First use requires approval in System Settings → General →
+Login Items. The helper's `BundleProgram` and Mach service plist are embedded in
+the app by `scripts/build-lid-helper.sh` and signed before the enclosing app.
+Both XPC peers check the signing identity/team; the helper accepts only the
+console user's signed app and exposes fixed operations, not arbitrary commands.
+
+Public idle assertions do not override lid closure. The helper uses `pmset -a
+disablesleep` for a renewable lease of at most ten seconds. This is a system-wide
+override: **use Dream Of Spring's Sleep Now while protection is active**, since
+the ordinary Apple-menu sleep request can be suppressed. Screens can still sleep.
+The helper checks battery protection independently, drops protection on power
+source changes and critical thermal state, and restores sleep on disconnect,
+expiry, termination and startup recovery. A durable root-owned journal under
+`/var/db/art.gardenplanner.Dream-Of-Spring` records ownership before setting the
+override. Existing sleep-disable settings belonging to another utility are
+rejected. Concurrent utilities writing the same global flag cannot be reliably
+distinguished and should not be used together.
+
+Sleep requests wait for the helper to acknowledge restoration; failed restoration
+is retried and shown in the menu. Helper cleanup is independent of the existing
+120-second sleep retry cooldown. Automated tests inject the helper transport and
+power-setting backend and never change the real sleep setting. Physical lid-close
+behavior, on AC and battery with no external monitor, requires a manual hardware
+check; a successful setting write alone is not proof of continued execution.
 
 Battery reserve protection is an explicit exception. It is enabled by default
 with a 20% reserve target (configurable from 15–30% in the menu). On internal
@@ -53,7 +98,8 @@ still applies if macOS does not stay asleep. Tests never invoke the real actuato
 
 The implementation in v1 follows the phases described in `PLAN.md`. App
 Sandbox is **off** (personal-use, not Mac App Store); the actuator calls
-`IOPMSleepSystem` directly from the GUI process — no privileged helper.
+`IOPMSleepSystem` directly from the GUI process. Only the optional closed-lid
+override uses the privileged helper described above.
 
 ## Layout
 
@@ -175,8 +221,9 @@ Worst-case latency past the configured timeout: poll (≤30 s) + grace (15 s)
 
 ### What is *intentionally not* handled
 
-- `PreventUserIdleDisplaySleep` (display sleep) — out of scope; only system
-  sleep is enforced.
+- Display sleep itself — not enforced. Display assertions are included in
+  ordinary blocker detection because they transitively prevent system idle
+  sleep, but they never qualify for closed-lid protection.
 - `PreventSystemSleep` (kernel / I/O subsystem) — the sleep request can fail
   here; we log and back off via the cooldown rather than escalating.
 - Releasing other processes' assertions — only the owning process can; we

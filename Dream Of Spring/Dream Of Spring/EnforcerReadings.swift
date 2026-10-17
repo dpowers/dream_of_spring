@@ -14,6 +14,8 @@ struct EnforcerReadings {
     var battery: BatteryState? = nil
     var humanInputCount: UInt64? = nil
     var humanIdleSeconds: TimeInterval? = nil
+    var lidState: LidState = .unavailable
+    var assertionsAvailable: Bool = true
 
     static func read() -> Self {
         let settings = PowerInfo.activeSettings()
@@ -27,18 +29,26 @@ struct EnforcerReadings {
         return Self(idleSeconds: PowerInfo.userIdleSeconds(), settings: settings,
                     blockers: assertions?.blockers ?? [], cameraActivity: camera,
                     microphoneActivity: microphone, meetingActivity: meeting, battery: battery,
-                    humanInputCount: human.count, humanIdleSeconds: human.idle)
+                    humanInputCount: human.count, humanIdleSeconds: human.idle,
+                    lidState: PowerSafetyReadings.lidIsClosed().map { $0 ? .closed : .open } ?? .unavailable,
+                    assertionsAvailable: assertions != nil)
     }
 
     /// Countdown polling avoids invoking pmset and enumerating capture devices
     /// every second. Normal enforcement is only evaluated on full samples.
-    func refreshingBatteryAndInput() -> Self {
+    func refreshingBatteryAndInput(refreshAssertions: Bool = false) -> Self {
         var result = self
         result.battery = PowerInfo.batteryState()
         let human = PowerInfo.humanActivity()
         result.humanInputCount = human.count
         result.humanIdleSeconds = human.idle
         result.idleSeconds = PowerInfo.userIdleSeconds()
+        if refreshAssertions {
+            let assertions = PowerInfo.assertionSnapshot()
+            result.assertionsAvailable = assertions != nil
+            result.blockers = assertions?.blockers ?? []
+            result.lidState = PowerSafetyReadings.lidIsClosed().map { $0 ? .closed : .open } ?? .unavailable
+        }
         return result
     }
 }

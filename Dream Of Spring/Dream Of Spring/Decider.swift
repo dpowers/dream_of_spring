@@ -20,6 +20,7 @@ nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     var isMeetingProtected: Bool = false
     var batteryIdleSeconds: TimeInterval = 0
     var batteryIdleLimitSeconds: TimeInterval? = nil
+    var isClosedLidProtected: Bool = false
 }
 
 nonisolated enum EnforcerAction: Equatable, Sendable {
@@ -39,6 +40,7 @@ nonisolated enum Decider {
         if let limit = s.batteryIdleLimitSeconds, s.batteryIdleSeconds >= limit {
             return .requestSleep
         }
+        if s.isClosedLidProtected { return .doNothing }
         if s.isPaused { return .doNothing }
         if s.configuredTimeoutSeconds == 0 { return .doNothing }
         if s.isCaptureActive || s.isMeetingProtected { return .doNothing }
