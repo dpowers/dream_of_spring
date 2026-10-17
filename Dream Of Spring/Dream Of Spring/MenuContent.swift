@@ -81,15 +81,12 @@ struct MenuContent: View {
             }
         }
 
-        Menu("Closed-lid support") {
-            Text(enforcer.closedLidController.message)
-            Button(enforcer.closedLidController.needsApproval ? "Approve in System Settings…" : "Enable closed-lid support…") {
-                enforcer.closedLidController.enableSupport()
-                enforcer.tick()
+        if enforcer.closedLidController.needsApproval {
+            Button("Approve closed-lid access in System Settings…") {
+                enforcer.closedLidController.openApprovalSettings()
             }
-            Text("Allow programs individually under App policies.")
-            Text("Only active system-sleep assertions qualify.")
-            Text("Battery protection takes priority.")
+        } else if enforcer.closedLidController.hasFailure {
+            Text(enforcer.closedLidController.message)
         }
         Button("Sleep Now") { enforcer.sleepNow() }
 

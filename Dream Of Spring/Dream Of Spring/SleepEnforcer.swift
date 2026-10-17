@@ -91,6 +91,7 @@ final class SleepEnforcer {
         self.wallClock = wallClock
         self.startAutomatically = startAutomatically
         guard startAutomatically else { return }
+        self.closedLidController.prepareSupport()
         warningController = BatteryWarningController()
         powerSourceObserver = PowerSourceObserver(onChange: { [weak self] in self?.tick() },
             onSleep: { [weak self] in self?.prepareForSleep() },
@@ -191,7 +192,6 @@ final class SleepEnforcer {
     func batterySettingsChanged() { tick() }
 
     func closedLidSettingsChanged() {
-        if !closedLidPreferences.permissions.isEmpty { closedLidController.enableSupport() }
         tick()
     }
 

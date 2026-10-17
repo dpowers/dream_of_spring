@@ -31,8 +31,12 @@ seconds; expensive power-settings and capture reads stay at thirty seconds.
 Check the menu for active protection before closing the lid.
 
 Actual lid-close suppression uses the privileged `LidHelper` daemon, registered
-via `SMAppService`. First use requires approval in System Settings → General →
-Login Items. The helper's `BundleProgram` and Mach service plist are embedded in
+automatically at normal app startup via `SMAppService`; there is no separate
+support switch. macOS still requires approval in System Settings → General →
+Login Items. The menu shows an approval action only while that system permission
+is pending, and picks up approval changes during polling even without an active
+assertion. Startup does not automatically open Settings. The helper's
+`BundleProgram` and Mach service plist are embedded in
 the app by `scripts/build-lid-helper.sh` and signed before the enclosing app.
 Both XPC peers check the signing identity/team; the helper accepts only the
 console user's signed app and exposes fixed operations, not arbitrary commands.

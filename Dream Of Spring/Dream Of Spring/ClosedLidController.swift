@@ -12,11 +12,15 @@ final class ClosedLidController {
     typealias Transport = @MainActor (Double, Bool, Bool, Double, @escaping Reply) -> Void
 
     private(set) var isActive = false
-    private(set) var message = "Closed-lid support is not enabled"
+    private(set) var message = "Preparing closed-lid access"
     private(set) var needsApproval = false
     private(set) var hasFailure = false
     private let disabled: Bool
     private let transport: Transport?
+    private let readServiceStatus: @MainActor () -> SMAppService.Status
+    private let registerService: @MainActor () throws -> Void
+    private let openSettings: @MainActor () -> Void
+    private var serviceStatus: SMAppService.Status?
     private var connection: NSXPCConnection?
     private var generation = 0
     private var inFlight = false
@@ -32,29 +36,59 @@ final class ClosedLidController {
         var reserve: Double
     }
 
-    init(disabled: Bool = EnforcementRuntime.isDisabled, transport: Transport? = nil) {
+    init(disabled: Bool = EnforcementRuntime.isDisabled, transport: Transport? = nil,
+         readServiceStatus: @MainActor @escaping () -> SMAppService.Status = {
+             SMAppService.daemon(plistName: ClosedLidService.plistName).status
+         },
+         registerService: @MainActor @escaping () throws -> Void = {
+             try SMAppService.daemon(plistName: ClosedLidService.plistName).register()
+         },
+         openSettings: @MainActor @escaping () -> Void = { SMAppService.openSystemSettingsLoginItems() }) {
         self.disabled = disabled
         self.transport = transport
+        self.readServiceStatus = readServiceStatus
+        self.registerService = registerService
+        self.openSettings = openSettings
     }
 
-    func enableSupport() {
-        guard !disabled else { return }
-        let service = SMAppService.daemon(plistName: ClosedLidService.plistName)
+    /// Registration is part of normal startup, not a second feature permission.
+    /// macOS approval is still required for a privileged daemon. Do not repeatedly
+    /// register a denied service or open Settings without a user action.
+    func prepareSupport() {
+        guard !disabled, transport == nil else { return }
         do {
-            if service.status == .notRegistered { try service.register() }
-            needsApproval = service.status == .requiresApproval
-            if needsApproval {
-                message = "Approve Dream Of Spring in Login Items to enable closed-lid support"
-                SMAppService.openSystemSettingsLoginItems()
-            } else if service.status == .enabled {
-                message = "Ready — waiting for an allowed app's system-sleep assertion"
-            } else {
-                message = "Closed-lid helper is unavailable; install the app in Applications"
-            }
-        } catch { message = "Could not enable closed-lid support: \(error.localizedDescription)" }
+            if readServiceStatus() == .notRegistered { try registerService() }
+            refreshSupport()
+        } catch {
+            refreshSupport()
+            hasFailure = true
+            message = "Could not prepare closed-lid access: \(error.localizedDescription)"
+        }
+    }
+
+    func openApprovalSettings() {
+        refreshSupport()
+        if needsApproval { openSettings() }
+    }
+
+    private func refreshSupport() {
+        guard !disabled, transport == nil else { return }
+        let status = readServiceStatus()
+        guard status != serviceStatus else { return }
+        serviceStatus = status
+        needsApproval = status == .requiresApproval
+        hasFailure = status != .enabled && !needsApproval
+        if needsApproval {
+            message = "macOS approval required for closed-lid access"
+        } else if status == .enabled {
+            if !isActive { message = "Ready — waiting for an allowed app's system-sleep assertion" }
+        } else {
+            message = "Closed-lid helper is unavailable; relaunch the installed app to retry setup"
+        }
     }
 
     func update(seconds: Double, allowOnBattery: Bool = false, protectBattery: Bool, reserve: Double) {
+        refreshSupport()
         pending = Request(seconds: seconds, allowOnBattery: allowOnBattery, protectBattery: protectBattery, reserve: reserve)
         sendPending()
     }
@@ -79,10 +113,10 @@ final class ClosedLidController {
             return
         }
         if transport == nil {
-            let status = SMAppService.daemon(plistName: ClosedLidService.plistName).status
+            let status = readServiceStatus()
             needsApproval = status == .requiresApproval
             guard status == .enabled else {
-                message = needsApproval ? "Closed-lid support needs approval in Login Items" : "Enable closed-lid support to protect this work"
+                message = needsApproval ? "macOS approval required for closed-lid access" : "Closed-lid helper is unavailable; relaunch the installed app to retry setup"
                 isActive = false
                 finishRelease(success: possiblyActiveUntil <= ProcessInfo.processInfo.systemUptime, message: message)
                 return
