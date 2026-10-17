@@ -1,147 +1,190 @@
-import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-struct MenuContent: View {
+/// Populate once per opening. Live Observation updates must not replace menu
+/// items while AppKit is tracking the pointer through a submenu.
+@MainActor
+final class MenuContent: NSObject, NSMenuDelegate {
     let enforcer: SleepEnforcer
     let launchAtLogin: LaunchAtLogin
+    let menu = NSMenu()
 
-    var body: some View {
-        Text("Idle: \(format(seconds: enforcer.idleSeconds))")
-        Text(timerLine)
+    init(enforcer: SleepEnforcer, launchAtLogin: LaunchAtLogin) {
+        self.enforcer = enforcer
+        self.launchAtLogin = launchAtLogin
+        super.init()
+        menu.autoenablesItems = false
+        menu.delegate = self
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
+        launchAtLogin.refresh()
+        menu.removeAllItems()
+        populate(menu)
+    }
+
+    private func populate(_ menu: NSMenu) {
+        menu.addText("Idle: \(format(seconds: enforcer.idleSeconds))")
+        menu.addText(timerLine)
         if let battery = enforcer.battery {
-            Text("Battery: \(Int(battery.percentage.rounded()))%\(battery.isOnBatteryPower ? "" : " (external power)")")
+            menu.addText("Battery: \(Int(battery.percentage.rounded()))%\(battery.isOnBatteryPower ? "" : " (external power)")")
         }
         if enforcer.batteryPlan != nil {
-            Text("Preserving a \(Int(enforcer.batteryPreferences.reservePercentage))% reserve")
-            Text("Human interaction resets the battery allowance")
+            menu.addText("Preserving a \(Int(enforcer.batteryPreferences.reservePercentage))% reserve")
+            menu.addText("Human interaction resets the battery allowance")
         }
-        Text(statusLine)
+        menu.addText(statusLine)
         if !enforcer.closedLidPreferences.permissions.isEmpty {
-            Text(enforcer.closedLidStatus)
+            menu.addText(enforcer.closedLidStatus)
             if enforcer.closedLidLeaseSeconds > 0 || enforcer.closedLidController.isActive {
-                Text("To sleep during protected work, choose Sleep Now here.")
+                menu.addText("To sleep during protected work, choose Sleep Now here.")
             }
         }
         if enforcer.isCaptureProtected && enforcer.batteryIdleLimitSeconds == nil {
-            Text("Capture wait started by: \(enforcer.lastCaptureResetReason)")
+            menu.addText("Capture wait started by: \(enforcer.lastCaptureResetReason)")
         }
 
-        Divider()
+        menu.addItem(.separator())
         if enforcer.blockers.isEmpty {
-            Text("Nothing is blocking sleep")
+            menu.addText("Nothing is blocking sleep")
         } else {
-            Text("Blocking sleep:")
-            ForEach(enforcer.blockers) { blocker in
-                BlockerPolicyMenu(
-                    enforcer: enforcer,
-                    identifier: blocker.identifier,
-                    alternateIdentifiers: blocker.alternateIdentifiers,
-                    label: "\(marker(for: enforcer.whitelist.policy(for: blocker.policyIdentifiers)))  \(blocker.displayName) — \(blocker.reason)"
-                )
+            menu.addText("Blocking sleep:")
+            for blocker in enforcer.blockers {
+                let label = "\(marker(for: enforcer.whitelist.policy(for: blocker.policyIdentifiers)))  \(blocker.displayName) — \(blocker.reason)"
+                addPolicyMenu(to: menu, identifier: blocker.identifier,
+                              alternateIdentifiers: blocker.alternateIdentifiers, label: label)
             }
         }
 
-        Divider()
+        menu.addItem(.separator())
         if enforcer.isPaused {
-            Button("Resume forced sleep") {
-                enforcer.resume()
-            }
+            menu.addAction("Resume forced sleep") { [enforcer] in enforcer.resume() }
         } else {
-            Menu("Pause forced sleep") {
-                Button("Pause for 15 minutes") { enforcer.pause(for: 15 * 60) }
-                Button("Pause for 1 hour") { enforcer.pause(for: 60 * 60) }
-                Button("Pause until I resume") { enforcer.pause(for: nil) }
-            }
+            let pause = menu.addSubmenu("Pause forced sleep")
+            pause.addAction("Pause for 15 minutes") { [enforcer] in enforcer.pause(for: 15 * 60) }
+            pause.addAction("Pause for 1 hour") { [enforcer] in enforcer.pause(for: 60 * 60) }
+            pause.addAction("Pause until I resume") { [enforcer] in enforcer.pause(for: nil) }
         }
 
-        Menu("App policies") {
-            let savedIDs = Set(enforcer.whitelist.policies.keys).union(enforcer.closedLidPreferences.permissions.keys)
-            if savedIDs.isEmpty {
-                Text("No saved app policies")
-            } else {
-                // Resolve displayName once per id; `displayName` does a linear
-                // scan of running applications, so doing it inside a sort
-                // comparator would be O(N log N) scans.
-                let sorted = savedIDs
-                    .map { (id: $0, name: $0.displayName) }
-                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                ForEach(sorted, id: \.id) { entry in
-                    let policy = enforcer.whitelist.policy(for: entry.id)
-                    BlockerPolicyMenu(
-                        enforcer: enforcer,
-                        identifier: entry.id,
-                        label: "\(marker(for: policy))  \(entry.name) \(policySuffix(for: policy))"
-                    )
-                }
+        let policies = menu.addSubmenu("App policies")
+        let savedIDs = Set(enforcer.whitelist.policies.keys).union(enforcer.closedLidPreferences.permissions.keys)
+        if savedIDs.isEmpty {
+            policies.addText("No saved app policies")
+        } else {
+            let sorted = savedIDs
+                .map { (id: $0, name: $0.displayName) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            for entry in sorted {
+                let policy = enforcer.whitelist.policy(for: entry.id)
+                addPolicyMenu(to: policies, identifier: entry.id,
+                              label: "\(marker(for: policy))  \(entry.name) \(policySuffix(for: policy))")
             }
-            Divider()
-            Button("Add app from /Applications…") {
-                addAppToWhitelistFromPicker()
-            }
+        }
+        policies.addItem(.separator())
+        policies.addAction("Add app from /Applications…") { [weak self] in
+            self?.addAppToWhitelistFromPicker()
         }
 
         if enforcer.closedLidController.needsApproval {
-            Button("Approve closed-lid access in System Settings…") {
+            menu.addAction("Approve closed-lid access in System Settings…") { [enforcer] in
                 enforcer.closedLidController.openApprovalSettings()
             }
         } else if enforcer.closedLidController.hasFailure {
-            Text(enforcer.closedLidController.message)
+            menu.addText(enforcer.closedLidController.message)
         }
-        Button("Sleep Now") { enforcer.sleepNow() }
+        menu.addAction("Sleep Now") { [enforcer] in enforcer.sleepNow() }
 
-        Divider()
-        Menu("Battery Protection") {
-            Toggle("Preserve battery when unattended", isOn: Binding(
-                get: { enforcer.batteryPreferences.isEnabled },
-                set: { enforcer.batteryPreferences.isEnabled = $0; enforcer.batterySettingsChanged() }
-            ))
-            Picker("Reserve target", selection: Binding(
-                get: { enforcer.batteryPreferences.reservePercentage },
-                set: { enforcer.batteryPreferences.setReservePercentage($0); enforcer.batterySettingsChanged() }
-            )) {
-                ForEach([15.0, 20.0, 25.0, 30.0], id: \.self) { value in
-                    Text("\(Int(value))%\(value == 20 ? " (recommended)" : "")").tag(value)
-                }
-            }
-            .disabled(!enforcer.batteryPreferences.isEnabled)
-            Divider()
-            Text("On battery, at \(Int(enforcer.batteryPreferences.reservePercentage + 10))%: up to 30 min unattended")
-            Text("At the reserve target: 10 min · At 10%: 3 min · At 5%: 1 min")
-            Text("Faster drain can shorten the 30-minute allowance")
-            Text("Limits override pauses, whitelists, and calls")
-            if let rate = enforcer.batteryDrainPerHour {
-                Divider()
-                Text("Recent drain: ~\(String(format: "%.1f", rate)) percentage points/hour")
-            }
-            if let plan = enforcer.batteryPlan {
-                Text("Without interaction: \(format(seconds: plan.remainingSeconds)) remaining")
-                if plan.reason == .approachingReserve {
-                    Text("Allowance shortened to protect your reserve")
-                }
-            }
+        menu.addItem(.separator())
+        addBatteryMenu(to: menu)
+        menu.addAction("Launch at Login", checked: launchAtLogin.isEnabled) { [launchAtLogin] in
+            launchAtLogin.toggle()
         }
-
-        Toggle("Launch at Login", isOn: Binding(
-            get: { launchAtLogin.isEnabled },
-            set: { _ in launchAtLogin.toggle() }
-        ))
-        Button("Open Energy Saver Settings…") {
+        menu.addAction("Open Energy Saver Settings…") {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.battery") {
                 NSWorkspace.shared.open(url)
             }
         }
-
-        Divider()
-        Text("Version \(appVersion)")
-        Button("Copy Sleep Diagnostics") {
+        menu.addItem(.separator())
+        menu.addText("Version \(appVersion)")
+        menu.addAction("Copy Sleep Diagnostics") { [enforcer] in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(enforcer.diagnostics, forType: .string)
         }
-        Button("Quit Dream Of Spring") {
+        menu.addAction("Quit Dream Of Spring", keyEquivalent: "q") {
             NSApplication.shared.terminate(nil)
         }
-        .keyboardShortcut("q")
+    }
+
+    private func addBatteryMenu(to menu: NSMenu) {
+        let battery = menu.addSubmenu("Battery Protection")
+        battery.addAction("Preserve battery when unattended", checked: enforcer.batteryPreferences.isEnabled) { [enforcer] in
+            enforcer.batteryPreferences.isEnabled.toggle()
+            enforcer.batterySettingsChanged()
+        }
+        let reserve = battery.addSubmenu("Reserve target", enabled: enforcer.batteryPreferences.isEnabled)
+        for value in [15.0, 20.0, 25.0, 30.0] {
+            reserve.addAction("\(Int(value))%\(value == 20 ? " (recommended)" : "")",
+                              checked: enforcer.batteryPreferences.reservePercentage == value) { [enforcer] in
+                enforcer.batteryPreferences.setReservePercentage(value)
+                enforcer.batterySettingsChanged()
+            }
+        }
+        battery.addItem(.separator())
+        battery.addText("On battery, at \(Int(enforcer.batteryPreferences.reservePercentage + 10))%: up to 30 min unattended")
+        battery.addText("At the reserve target: 10 min · At 10%: 3 min · At 5%: 1 min")
+        battery.addText("Faster drain can shorten the 30-minute allowance")
+        battery.addText("Limits override pauses, whitelists, and calls")
+        if let rate = enforcer.batteryDrainPerHour {
+            battery.addItem(.separator())
+            battery.addText("Recent drain: ~\(String(format: "%.1f", rate)) percentage points/hour")
+        }
+        if let plan = enforcer.batteryPlan {
+            battery.addText("Without interaction: \(format(seconds: plan.remainingSeconds)) remaining")
+            if plan.reason == .approachingReserve {
+                battery.addText("Allowance shortened to protect your reserve")
+            }
+        }
+    }
+
+    private func addPolicyMenu(to menu: NSMenu, identifier: AppIdentifier,
+                               alternateIdentifiers: [AppIdentifier] = [], label: String) {
+        let policyMenu = menu.addSubmenu(label)
+        let identifiers = [identifier] + alternateIdentifiers
+        let current = enforcer.whitelist.policy(for: identifiers)
+        let lidPermission = enforcer.closedLidPreferences.permission(for: identifiers)
+        policyMenu.addAction("Allow keeping awake with lid closed", checked: lidPermission != nil) { [enforcer] in
+            let enabled = enforcer.closedLidPreferences.permission(for: identifiers) == nil
+            enforcer.closedLidPreferences.set(enabled ? ClosedLidPermission() : nil,
+                for: identifier, replacing: alternateIdentifiers)
+            enforcer.closedLidSettingsChanged()
+        }
+        if let lidPermission {
+            policyMenu.addAction("Only on external power", checked: lidPermission.onlyOnExternalPower) { [enforcer] in
+                guard let permission = enforcer.closedLidPreferences.permission(for: identifiers) else { return }
+                enforcer.closedLidPreferences.set(ClosedLidPermission(onlyOnExternalPower: !permission.onlyOnExternalPower),
+                    for: identifier, replacing: alternateIdentifiers)
+                enforcer.closedLidSettingsChanged()
+            }
+            policyMenu.addText("While this program holds a system-sleep assertion.")
+            policyMenu.addText("Battery protection still applies.")
+        }
+        policyMenu.addItem(.separator())
+        policyMenu.addAction("Don't whitelist", checked: current == nil) { [enforcer] in
+            enforcer.whitelist.setPolicy(nil, for: identifier, replacing: alternateIdentifiers)
+            enforcer.tick()
+        }
+        policyMenu.addAction("Always allow", checked: current == .alwaysAllow) { [enforcer] in
+            enforcer.whitelist.setPolicy(.alwaysAllow, for: identifier, replacing: alternateIdentifiers)
+            enforcer.tick()
+        }
+        policyMenu.addItem(.separator())
+        for preset in WhitelistPreset.allowUpToOptions {
+            policyMenu.addAction("Allow up to \(preset.label)", checked: current == .allowUpTo(seconds: preset.seconds)) { [enforcer] in
+                enforcer.whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier, replacing: alternateIdentifiers)
+                enforcer.tick()
+            }
+        }
     }
 
     private var timerLine: String {
@@ -276,59 +319,45 @@ struct MenuContent: View {
     }
 }
 
-private struct BlockerPolicyMenu: View {
-    let enforcer: SleepEnforcer
-    private var whitelist: Whitelist { enforcer.whitelist }
-    let identifier: AppIdentifier
-    var alternateIdentifiers: [AppIdentifier] = []
-    let label: String
+/// NSMenuItem's target is weak; the item owns its action so it lives exactly as
+/// long as the snapshot. Actions that need the menu controller capture it weakly.
+@MainActor
+private final class ActionMenuItem: NSMenuItem {
+    private let handler: () -> Void
 
-    var body: some View {
-        Menu {
-            let identifiers = [identifier] + alternateIdentifiers
-            let current = whitelist.policy(for: identifiers)
-            let lidPermission = enforcer.closedLidPreferences.permission(for: identifiers)
-            Toggle("Allow keeping awake with lid closed", isOn: Binding(
-                get: { lidPermission != nil },
-                set: { enabled in
-                    enforcer.closedLidPreferences.set(enabled ? ClosedLidPermission() : nil,
-                        for: identifier, replacing: alternateIdentifiers)
-                    enforcer.closedLidSettingsChanged()
-                }
-            ))
-            if let lidPermission {
-                Toggle("Only on external power", isOn: Binding(
-                    get: { lidPermission.onlyOnExternalPower },
-                    set: { externalOnly in
-                        enforcer.closedLidPreferences.set(ClosedLidPermission(onlyOnExternalPower: externalOnly),
-                            for: identifier, replacing: alternateIdentifiers)
-                        enforcer.closedLidSettingsChanged()
-                    }
-                ))
-                Text("While this program holds a system-sleep assertion.")
-                Text("Battery protection still applies.")
-            }
-            Divider()
-            Button(check(current == nil) + "Don't whitelist") {
-                whitelist.setPolicy(nil, for: identifier, replacing: alternateIdentifiers)
-                enforcer.tick()
-            }
-            Button(check(current == .alwaysAllow) + "Always allow") {
-                whitelist.setPolicy(.alwaysAllow, for: identifier, replacing: alternateIdentifiers)
-                enforcer.tick()
-            }
-            Divider()
-            ForEach(WhitelistPreset.allowUpToOptions, id: \.label) { preset in
-                let isSelected = current == .allowUpTo(seconds: preset.seconds)
-                Button(check(isSelected) + "Allow up to \(preset.label)") {
-                    whitelist.setPolicy(.allowUpTo(seconds: preset.seconds), for: identifier, replacing: alternateIdentifiers)
-                    enforcer.tick()
-                }
-            }
-        } label: {
-            Text(label)
-        }
+    init(title: String, keyEquivalent: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(performAction), keyEquivalent: keyEquivalent)
+        target = self
     }
 
-    private func check(_ on: Bool) -> String { on ? "✓ " : "   " }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func performAction() { handler() }
+}
+
+@MainActor
+private extension NSMenu {
+    func addText(_ title: String) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        addItem(item)
+    }
+
+    func addAction(_ title: String, checked: Bool = false, keyEquivalent: String = "",
+                   handler: @escaping () -> Void) {
+        let item = ActionMenuItem(title: title, keyEquivalent: keyEquivalent, handler: handler)
+        item.state = checked ? .on : .off
+        addItem(item)
+    }
+
+    func addSubmenu(_ title: String, enabled: Bool = true) -> NSMenu {
+        let submenu = NSMenu(title: title)
+        submenu.autoenablesItems = false
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        item.isEnabled = enabled
+        addItem(item)
+        return submenu
+    }
 }

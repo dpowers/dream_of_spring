@@ -23,13 +23,31 @@ final class Dream_Of_SpringUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testNestedMenuStaysOpen() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["--disable-sleep-enforcement"]
+        app.launchArguments = ["--disable-sleep-enforcement", "-batteryProtectionEnabled", "YES"]
         app.launch()
+        defer { app.terminate() }
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        let statusItem = app.menuBars.menuBarItems["Dream Of Spring"]
+        XCTAssertTrue(statusItem.waitForExistence(timeout: 5))
+        statusItem.click()
+        let battery = app.menuItems["Battery Protection"]
+        XCTAssertTrue(battery.waitForExistence(timeout: 3))
+        battery.hover()
+        let reserve = app.menuItems["Reserve target"]
+        XCTAssertTrue(reserve.waitForExistence(timeout: 3))
+        reserve.hover()
+        let choice = app.menuItems["25%"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 3))
+        choice.hover()
+
+        // Stay beyond the reported half-second dismissal, checking that the
+        // nested item remains visible and available for pointer interaction.
+        let disappears = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !choice.exists || !choice.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [disappears], timeout: 2), .timedOut)
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     @MainActor

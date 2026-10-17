@@ -115,7 +115,7 @@ dream_of_spring/                          ← repo root (this file)
 └── Dream Of Spring/                      ← Xcode project root
     ├── Dream Of Spring.xcodeproj
     ├── Dream Of Spring/                  ← app target sources
-    │   ├── Dream_Of_SpringApp.swift      ← @main, MenuBarExtra scene, dynamic icon
+    │   ├── Dream_Of_SpringApp.swift      ← @main, AppKit status item, dynamic icon
     │   ├── SleepEnforcer.swift           ← @Observable; 30s poll loop, decision + actuation
     │   ├── PowerInfo.swift               ← IOKit reads (idle, assertions) + pmset shell-out
     │   ├── CaptureActivity.swift         ← camera/mic in-use reads (CoreMediaIO + CoreAudio)
@@ -123,7 +123,7 @@ dream_of_spring/                          ← repo root (this file)
     │   ├── Decider.swift                 ← pure: snapshot → action (unit-tested)
     │   ├── Whitelist.swift               ← UserDefaults-backed Set<AppIdentifier>
     │   ├── LaunchAtLogin.swift           ← SMAppService wrapper
-    │   ├── MenuContent.swift             ← SwiftUI for the menu bar dropdown
+    │   ├── MenuContent.swift             ← native menu snapshot built on opening
     │   └── Assets.xcassets
     ├── Dream Of SpringTests/             ← Swift Testing (`import Testing`, `@Test`)
     └── Dream Of SpringUITests/           ← XCTest UI tests
@@ -133,6 +133,12 @@ Source folders use Xcode's **file-system synchronized groups**
 (`PBXFileSystemSynchronizedRootGroup`). Drop new `.swift` files into the right
 folder and Xcode picks them up — do **not** hand-edit `project.pbxproj` to
 register sources.
+
+The status menu uses an AppKit `NSMenu` populated in `menuWillOpen`. Keep its
+items stable during tracking: reactive rebuilds from the sleep monitor can
+dismiss nested submenus. Status text and checkmarks refresh on the next opening;
+actions read current model state, and monitoring continues while the menu is
+open. The status icon observes the model separately from the menu.
 
 ## Build & test
 
