@@ -4,6 +4,7 @@
 //
 import Foundation
 import Observation
+import OSLog
 import ServiceManagement
 
 @MainActor @Observable
@@ -57,12 +58,18 @@ final class ClosedLidController {
     func prepareSupport() {
         guard !disabled, transport == nil else { return }
         do {
-            if readServiceStatus() == .notRegistered { try registerService() }
+            let status = readServiceStatus()
+            if status == .notRegistered || status == .notFound { try registerService() }
             refreshSupport()
+            Logger(subsystem: ClosedLidService.name, category: "Setup").info("Closed-lid service status: \(self.readServiceStatus().rawValue)")
         } catch {
             refreshSupport()
+            // macOS can register the daemon, then reject bootstrapping until
+            // approval. That is a pending permission, not a setup failure.
+            if needsApproval { return }
             hasFailure = true
             message = "Could not prepare closed-lid access: \(error.localizedDescription)"
+            Logger(subsystem: ClosedLidService.name, category: "Setup").error("Closed-lid registration failed: \(String(describing: error), privacy: .public)")
         }
     }
 

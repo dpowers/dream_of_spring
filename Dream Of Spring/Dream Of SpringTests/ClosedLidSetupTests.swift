@@ -3,13 +3,15 @@
 //  Dream Of SpringTests
 //
 import ServiceManagement
+import Foundation
 import Testing
 @testable import Dream_Of_Spring
 
 @MainActor
 struct ClosedLidSetupTests {
-    @Test func startupRegistersWithoutOpeningSettingsAndPicksUpApprovalWhileIdle() {
-        var status = SMAppService.Status.notRegistered
+    @Test(arguments: [SMAppService.Status.notRegistered, .notFound])
+    func startupRegistersWithoutOpeningSettingsAndPicksUpApprovalWhileIdle(initialStatus: SMAppService.Status) {
+        var status = initialStatus
         var registrations = 0
         var settingsOpens = 0
         let controller = ClosedLidController(disabled: false,
@@ -43,6 +45,19 @@ struct ClosedLidSetupTests {
         status = .requiresApproval
         controller.update(seconds: 0, protectBattery: true, reserve: 20)
         #expect(controller.needsApproval)
+    }
+
+    @Test func registrationAwaitingApprovalIsNotShownAsSetupFailure() {
+        var status = SMAppService.Status.notFound
+        let controller = ClosedLidController(disabled: false,
+            readServiceStatus: { status }, registerService: {
+                status = .requiresApproval
+                throw NSError(domain: SMAppServiceErrorDomain, code: 1)
+            })
+        controller.prepareSupport()
+        #expect(controller.needsApproval)
+        #expect(!controller.hasFailure)
+        #expect(controller.message == "macOS approval required for closed-lid access")
     }
 
     @Test func disabledRuntimeNeverRegistersOrOpensSettings() {
