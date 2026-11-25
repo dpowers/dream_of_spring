@@ -141,17 +141,16 @@ final class SleepEnforcer {
         }
     }
 
-    var closedLidStatus: String {
+    /// nil while idle: waiting for an allowed assertion is the normal state, not worth a menu line.
+    var closedLidStatus: String? {
         if closedLidController.hasFailure { return closedLidController.message }
         if lidState == .unavailable { return "Closed-lid protection unavailable: no readable lid sensor" }
         if closedLidSuspended { return "Closed-lid protection suspended until your next input" }
         if battery == nil { return "Closed-lid protection unavailable: battery status unknown" }
-        if closedLidController.isActive {
-            let names = Set(eligibleClosedLidBlockers.map(\.displayName)).sorted().joined(separator: ", ")
-            return "Keeping awake with lid closed: \(names)"
-        }
+        // Active protection is shown on the "Keeping Mac awake" rows instead.
+        if closedLidController.isActive { return nil }
         if closedLidLeaseSeconds > 0 { return closedLidController.message }
-        return "Closed-lid protection waiting for an allowed system-sleep assertion"
+        return nil
     }
 
     var effectiveSleepRemainingSeconds: TimeInterval? {
@@ -407,7 +406,7 @@ final class SleepEnforcer {
         Last capture wait reset: \(lastCaptureResetReason) at \(lastCaptureResetAt?.ISO8601Format() ?? "startup")
         Meeting: \(meetingActivity.rawValue); protected: \(isMeetingProtected); quiet time remaining: \(meetingQuietSecondsRemaining)s
         Lid: \(lidState.rawValue); permission count: \(closedLidPreferences.permissions.count); lease: \(closedLidLeaseSeconds)s
-        Closed-lid: \(closedLidStatus); helper: \(closedLidController.message)
+        Closed-lid: \(closedLidStatus ?? "idle"); helper: \(closedLidController.message)
         Decision: \(lastDecision)
         Last sleep request: \(lastSleepAttemptAt?.ISO8601Format() ?? "none"); failed: \(lastActuatorFailed)
         Blockers:

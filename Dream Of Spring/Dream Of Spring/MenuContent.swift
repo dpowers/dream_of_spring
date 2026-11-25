@@ -26,20 +26,10 @@ final class MenuContent: NSObject, NSMenuDelegate {
     }
 
     private func populate(_ menu: NSMenu) {
-        menu.addText("Idle: \(format(seconds: enforcer.idleSeconds))")
         menu.addText(timerLine)
-        if let battery = enforcer.battery {
-            menu.addText("Battery: \(Int(battery.percentage.rounded()))%\(battery.isOnBatteryPower ? "" : " (external power)")")
-        }
-        if enforcer.batteryPlan != nil {
-            menu.addText("Preserving a \(Int(enforcer.batteryPreferences.reservePercentage))% reserve")
-        }
         menu.addText(statusLine)
-        if !enforcer.closedLidPreferences.permissions.isEmpty {
-            menu.addText(enforcer.closedLidStatus)
-            if enforcer.closedLidLeaseSeconds > 0 || enforcer.closedLidController.isActive {
-                menu.addText("To sleep during protected work, choose Sleep Now here.")
-            }
+        if !enforcer.closedLidPreferences.permissions.isEmpty, let status = enforcer.closedLidStatus {
+            menu.addText(status)
         }
         if enforcer.isCaptureProtected && enforcer.batteryIdleLimitSeconds == nil {
             menu.addText("Capture wait started by: \(enforcer.lastCaptureResetReason)")
@@ -280,13 +270,21 @@ final class MenuContent: NSObject, NSMenuDelegate {
     }
 
     private var statusLine: String {
-        if enforcer.batteryPlan != nil, let remaining = enforcer.effectiveSleepRemainingSeconds {
+        // Battery wording only when its limit is what will actually trigger
+        // sleep; otherwise the ordinary status below is the truthful one.
+        if let plan = enforcer.batteryWarningPlan {
             if enforcer.lastActuatorFailed {
                 return "Status: ⚠ last sleep attempt failed (see Console.app)"
             }
-            return remaining > 0
-                ? "Status: reserve protection — sleep in \(format(seconds: remaining))"
-                : "Status: battery protection — requesting sleep"
+            guard plan.remainingSeconds > 0 else { return "Status: battery protection — requesting sleep" }
+            let reason = switch plan.reason {
+            case .approachingReserve:
+                "sleeping early to protect the \(Int(enforcer.batteryPreferences.reservePercentage))% reserve"
+            case .reserve: "battery limit for unattended use"
+            case .lowBattery: "low battery"
+            case .criticalBattery: "critical battery"
+            }
+            return "Status: \(reason) — sleep in \(format(seconds: plan.remainingSeconds))"
         }
         // Paused / dormant / on-a-call are the truthful state when the
         // enforcer isn't acting, so they take priority over a (possibly

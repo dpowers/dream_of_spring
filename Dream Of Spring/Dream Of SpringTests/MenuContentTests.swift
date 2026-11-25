@@ -55,7 +55,6 @@ struct MenuContentTests {
         fixture.enforcer.batteryPreferences.setReservePercentage(25)
 
         #expect(fixture.enforcer.idleSeconds == 5)
-        #expect(menu.item(withTitle: "Idle: 0 s") != nil)
         #expect(menu.item(withTitle: "Battery Protection")?.submenu === battery)
         #expect(battery.item(withTitle: "Reserve target")?.submenu === reserve)
         #expect(reserve.item(withTitle: "25%") === choice)
@@ -63,7 +62,6 @@ struct MenuContentTests {
         #expect(menu.item(withTitle: "Nothing is blocking sleep") != nil)
 
         fixture.open()
-        #expect(menu.item(withTitle: "Idle: 5 s") != nil)
         #expect(menu.item(withTitle: "Nothing is blocking sleep") == nil)
         let refreshed = try #require(menu.item(withTitle: "Battery Protection")?.submenu)
         #expect(refreshed.item(withTitle: "Reserve target")?.submenu?.item(withTitle: "25%")?.state == .on)
