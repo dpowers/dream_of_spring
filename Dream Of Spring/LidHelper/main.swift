@@ -15,25 +15,13 @@ private let journalURL = journalDirectory.appendingPathComponent("closed-lid-own
 /// Only fixed pmset operations are allowed. A stalled subprocess cannot stall
 /// the lease watchdog indefinitely. No commands or paths come from XPC clients.
 private func pmset(_ arguments: [String]) -> String? {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-    process.arguments = arguments
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = FileHandle.nullDevice
-    do { try process.run() } catch { return nil }
-    let deadline = ProcessInfo.processInfo.systemUptime + 2
-    while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline { usleep(10_000) }
-    if process.isRunning {
-        process.terminate()
-        usleep(100_000)
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
+    switch BoundedCommand.run("/usr/bin/pmset", arguments) {
+    case .success(let output):
+        return output
+    case .failure(let failure):
+        logger.error("pmset \(arguments.joined(separator: " "), privacy: .public) \(failure.description, privacy: .public)")
         return nil
     }
-    guard process.terminationStatus == 0,
-          let data = try? pipe.fileHandleForReading.readToEnd() else { return nil }
-    return String(data: data, encoding: .utf8)
 }
 
 private func readDisabled() -> Bool? {
