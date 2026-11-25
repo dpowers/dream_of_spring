@@ -64,6 +64,21 @@ enum PowerInfo {
     private static let assertionTypeKey = "AssertType"
     private static let assertionLevelKey = "AssertLevel"
     private static let assertionNameKey = "AssertName"
+    private static let onBehalfOfPIDKey = "AssertionOnBehalfOfPID"
+
+    /// Daemons with no app bundle never get standalone rows. coreaudiod holds
+    /// assertions for whichever app has audio open; that app is listed itself.
+    private static let ignoredStandaloneNames: Set<String> = [
+        "powerd", "WindowServer", "loginwindow", "DreamOfSpringLidHelper", "coreaudiod"
+    ]
+
+    /// An assertion a daemon holds for another process duplicates that
+    /// process's own entry, and permission on the daemon would cover every
+    /// client. Only standalone programs asserting for themselves get rows.
+    nonisolated static func isHeldOnBehalfOfAnotherProcess(_ assertion: [String: Any], ownerPID: pid_t) -> Bool {
+        guard let client = (assertion[onBehalfOfPIDKey] as? NSNumber)?.int32Value else { return false }
+        return client > 0 && client != ownerPID
+    }
 
     /// All assertion type strings that prevent the kind of sleep we care about.
     /// `NoIdleSleepAssertion` / `NoDisplaySleepAssertion` are the older
@@ -197,10 +212,11 @@ enum PowerInfo {
             // .app. Give them an exact executable identity, not a name match.
             guard owner != nil || executable != nil else { continue }
             let name = owner?.displayName ?? executable!.lastPathComponent
-            if owner == nil && ["powerd", "WindowServer", "loginwindow", "DreamOfSpringLidHelper"].contains(name) { continue }
+            if owner == nil && ignoredStandaloneNames.contains(name) { continue }
             for a in matching {
                 let type = (a[assertionTypeKey] as? String) ?? ""
                 if owner == nil && !ClosedLidPolicy.isSystemAssertion(type) { continue }
+                if owner == nil && isHeldOnBehalfOfAnotherProcess(a, ownerPID: pid) { continue }
                 let reason = (a[assertionNameKey] as? String) ?? "(unnamed)"
                 let identifier: AppIdentifier = owner.map { .bundleID($0.bundleID) } ?? .executablePath(executable!.path)
                 result.append(Blocker(pid: pid, identifier: identifier,

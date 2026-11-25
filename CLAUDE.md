@@ -21,7 +21,10 @@ active `PreventUserIdleSystemSleep` or legacy `NoIdleSleepAssertion`. Merely
 running, display-sleep assertions, capture and meeting detection do not qualify.
 App helpers inherit the containing app's identity. Standalone programs and
 backup daemons can be selected by their exact resolved executable path; these
-additional rows do not broaden ordinary forced-sleep enforcement.
+additional rows do not broaden ordinary forced-sleep enforcement. Daemon
+assertions held for another process (`AssertionOnBehalfOfPID`, e.g. coreaudiod
+for any app with audio output open) get no standalone row; the client app is
+listed itself.
 
 `ClosedLidPreferences` stores permissions; `ClosedLidPolicy` determines eligibility.
 Permission plus an assertion vetoes ordinary enforcement, but never the battery

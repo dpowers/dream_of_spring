@@ -103,4 +103,11 @@ struct AssertionOwnerTests {
             }
         }
     }
+
+    @Test func daemonAssertionsHeldForAnotherProcessAreRecognised() {
+        let forGame: [String: Any] = ["AssertType": "PreventUserIdleSystemSleep", "AssertionOnBehalfOfPID": NSNumber(value: 65930)]
+        #expect(PowerInfo.isHeldOnBehalfOfAnotherProcess(forGame, ownerPID: 748))
+        #expect(!PowerInfo.isHeldOnBehalfOfAnotherProcess(forGame, ownerPID: 65930))
+        #expect(!PowerInfo.isHeldOnBehalfOfAnotherProcess(["AssertType": "PreventUserIdleSystemSleep"], ownerPID: 748))
+    }
 }
