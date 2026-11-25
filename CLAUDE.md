@@ -43,6 +43,13 @@ assertion. Startup does not automatically open Settings. The helper's
 the app by `scripts/build-lid-helper.sh` and signed before the enclosing app.
 Both XPC peers check the signing identity/team; the helper accepts only the
 console user's signed app and exposes fixed operations, not arbitrary commands.
+Replacing the app does not stop the running root helper (launchd keeps the old
+process alive from the deleted file), so the helper polls its own executable's
+identity each second (`HelperUpdateMonitor`). Once a replacement has been stable
+for three polls it restores sleep and exits; `KeepAlive` starts the new binary.
+It exits even if restoration fails, leaving the journal for the new helper's
+startup recovery. Every file the helper compiles must also be listed in the
+build phase's input paths, or Xcode's script sandbox denies the read.
 
 Public idle assertions do not override lid closure. The helper uses `pmset -a
 disablesleep` for a renewable lease of at most ten seconds. This is a system-wide

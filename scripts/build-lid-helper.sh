@@ -16,6 +16,7 @@ for HELPER_ARCH in $ARCHS; do
         "$APP_SOURCES/ClosedLidService.swift" "$APP_SOURCES/ClosedLidLease.swift" \
         "$APP_SOURCES/PowerSafetyReadings.swift" "$APP_SOURCES/BatteryState.swift" \
         "$APP_SOURCES/BatteryProtection.swift" "$APP_SOURCES/SleepTimerSettings.swift" \
+        "$APP_SOURCES/HelperUpdateMonitor.swift" \
         -o "$ARCH_OUTPUT"
     ARCH_OUTPUTS+=("$ARCH_OUTPUT")
 done

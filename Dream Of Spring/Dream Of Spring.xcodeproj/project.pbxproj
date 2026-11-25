@@ -248,6 +248,7 @@
 				"$(SRCROOT)/Dream Of Spring/BatteryState.swift",
 				"$(SRCROOT)/Dream Of Spring/BatteryProtection.swift",
 				"$(SRCROOT)/Dream Of Spring/SleepTimerSettings.swift",
+				"$(SRCROOT)/Dream Of Spring/HelperUpdateMonitor.swift",
 			);
 			name = "Build closed-lid helper";
 			outputPaths = (

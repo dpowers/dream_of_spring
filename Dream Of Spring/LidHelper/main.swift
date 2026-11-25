@@ -72,6 +72,13 @@ private func journal(_ owned: Bool) -> Bool {
     } catch { return false }
 }
 
+/// The running binary's path, captured at launch while it still exists on disk.
+private func executablePath() -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+    guard proc_pidpath(getpid(), &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
+}
+
 private final class Guardian {
     let lease = ClosedLidLease(recovering: FileManager.default.fileExists(atPath: journalURL.path),
         readDisabled: readDisabled, writeDisabled: { pmset(["-a", "disablesleep", $0 ? "1" : "0"]) != nil },
@@ -82,6 +89,13 @@ private final class Guardian {
     var reserve = 20.0
     var protection = BatteryProtection()
     var batteryPowerAtRenewal: Bool?
+    let path: String?
+    var updates: HelperUpdateMonitor?
+
+    init() {
+        path = executablePath()
+        updates = path.flatMap(ExecutableIdentity.read).map(HelperUpdateMonitor.init)
+    }
 
     var now: TimeInterval { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000 }
 
@@ -129,11 +143,25 @@ private final class Guardian {
     }
 
     func tick() {
+        restartIfUpdated()
         guard lease.ownsOverride else { return }
         if !lease.expire(now: now, permitted: permitted()) {
             logger.error("Sleep recovery failed: \(self.lease.error, privacy: .public)")
         }
         if !lease.ownsOverride { owner = nil }
+    }
+
+    /// Installing a new app replaces this file, but launchd keeps the old
+    /// process alive. Exit so KeepAlive starts the update. A failed restore
+    /// leaves the journal in place, so the new helper's startup recovery
+    /// retries it; waiting here could strand an old helper indefinitely.
+    private func restartIfUpdated() {
+        guard let path, updates?.observe(ExecutableIdentity.read(path: path)) == true else { return }
+        if !lease.release() {
+            logger.error("Exiting for helper update before sleep was restored; the new helper will recover: \(self.lease.error, privacy: .public)")
+        }
+        logger.notice("Helper executable was updated; exiting so launchd starts the new version")
+        exit(EXIT_SUCCESS)
     }
 }
 
