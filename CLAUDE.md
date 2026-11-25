@@ -60,6 +60,21 @@ power-setting backend and never change the real sleep setting. Physical lid-clos
 behavior, on AC and battery with no external monitor, requires a manual hardware
 check; a successful setting write alone is not proof of continued execution.
 
+## Sleep timers
+
+macOS System Settings no longer exposes the idle **system**-sleep timer on
+laptops (only display sleep), yet it is the timer Dream Of Spring enforces.
+The **Sleep Timers** submenu shows and sets it per power source (battery /
+power adapter). Reading uses unprivileged `pmset -g custom`
+(`SleepTimerSettings.parse`); writing goes through the same privileged helper
+as one more fixed operation, `setSleepTimer(minutes:source:)`, which runs only
+`pmset -b|-c sleep N` with N validated to 0…1440 and verifies the result.
+`SleepTimerSettings.swift` is compiled into both the app and the helper. A
+successful change triggers an immediate enforcement tick. Changes require the
+helper's Login Items approval; after an app update, an old helper process that
+lacks the operation fails the XPC call until it restarts. Tests inject the
+transport and never change real settings.
+
 Battery reserve protection is an explicit exception. It is enabled by default
 with a 20% reserve target (configurable from 15–30% in the menu). On internal
 battery power, the default maximum times without human input are:

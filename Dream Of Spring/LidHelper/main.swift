@@ -148,6 +148,27 @@ private final class Client: NSObject, ClosedLidServiceProtocol {
             guardian.update(client: id, seconds: seconds, allowOnBattery: allowOnBattery, protectBattery: protectBattery, reserve: reserve, reply: reply)
         }
     }
+
+    func setSleepTimer(minutes: Int, source: Int, reply: @escaping (Bool, String) -> Void) {
+        queue.async {
+            guard let source = SleepTimerSource(rawValue: source),
+                  let arguments = SleepTimerSettings.pmsetArguments(minutes: minutes, source: source) else {
+                reply(false, "Invalid sleep timer request")
+                return
+            }
+            guard pmset(arguments) != nil else {
+                reply(false, "macOS rejected the sleep timer change")
+                return
+            }
+            guard let output = pmset(["-g", "custom"]),
+                  SleepTimerSettings.parse(custom: output)?.timers[source]?.systemMinutes == minutes else {
+                reply(false, "macOS did not apply the sleep timer change")
+                return
+            }
+            logger.notice("Set \(source.label, privacy: .public) sleep timer to \(minutes, privacy: .public) min")
+            reply(true, "")
+        }
+    }
 }
 
 private final class Listener: NSObject, NSXPCListenerDelegate {

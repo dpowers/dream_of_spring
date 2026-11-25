@@ -5,7 +5,9 @@
 # with no Gatekeeper prompts.
 #
 # Prerequisites: scripts/setup-notarization.sh has been run on this machine.
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'echo "error: packaging failed at line $LINENO (exit $?). Distribution packaging did not complete." >&2' ERR
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_DIR="$REPO_ROOT/Dream Of Spring"
@@ -41,7 +43,17 @@ fi
 
 DERIVED="$(mktemp -d -t dos-build)"
 STAGE="$(mktemp -d -t dos-stage)"
-trap 'rm -rf "$DERIVED" "$STAGE"' EXIT
+cleanup() {
+    local status=$?
+    if [[ "$status" == 0 ]]; then
+        rm -rf "$DERIVED" "$STAGE"
+    else
+        echo "Build and staging files kept for diagnosis:" >&2
+        echo "  $DERIVED" >&2
+        echo "  $STAGE" >&2
+    fi
+}
+trap cleanup EXIT
 
 ARCHIVE="$DERIVED/Dream Of Spring.xcarchive"
 EXPORT_DIR="$STAGE/exported"
@@ -99,13 +111,18 @@ if ! grep -q "Developer ID Application" <<< "$SIG_AUTHORITY"; then
     exit 1
 fi
 
+# Certificate names need not be unique (for example, after renewal). Use the
+# SHA-1 fingerprint of the leaf certificate Xcode actually used for the export.
+codesign -d --extract-certificates="$STAGE/signing-cert-" "$EXPORTED_APP"
+SIGNING_IDENTITY="$(shasum -a 1 "$STAGE/signing-cert-0" | awk '{print $1}')"
+
 # The daemon is built by a script rather than a nested Xcode target. Explicitly
 # re-sign it with the exported Developer ID and secure timestamp for notarization,
 # then reseal the app while preserving its exported entitlements.
-codesign --force --options runtime --timestamp --sign "${SIG_AUTHORITY#Authority=}" \
+codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" \
     "$EXPORTED_APP/Contents/MacOS/DreamOfSpringLidHelper"
 codesign --force --timestamp --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
-    --sign "${SIG_AUTHORITY#Authority=}" "$EXPORTED_APP"
+    --sign "$SIGNING_IDENTITY" "$EXPORTED_APP"
 codesign --verify --deep --strict "$EXPORTED_APP"
 
 NOTARY_ZIP="$STAGE/for-notarization.zip"

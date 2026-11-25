@@ -51,7 +51,7 @@ check_team() {
     local expected_team="$1"
     shift
     local status
-    if env -u TEAM_ID PATH="$WORK/bin:$PATH" DEVELOPER_DIR="$WORK" \
+    if env -u TEAM_ID PATH="$WORK/bin:$PATH" DEVELOPER_DIR="$WORK" TMPDIR="$WORK/" \
         NOTARY_PROFILE=TestNotary EXPECTED_TEAM="$expected_team" \
         "$@" bash "$PACKAGE_SCRIPT" > "$WORK/output" 2>&1; then
         status=0
@@ -64,6 +64,16 @@ check_team() {
         exit 1
     fi
     echo "PASS: archive and export both use $expected_team"
+    if ! grep -Fq '(exit 73)' "$WORK/output" || \
+        ! grep -Fq 'Build and staging files kept for diagnosis:' "$WORK/output"; then
+        cat "$WORK/output" >&2
+        echo "FAIL: export failures must report the error and retain diagnostic files" >&2
+        exit 1
+    fi
+    while IFS= read -r directory; do
+        [[ -d "$directory" ]] || { echo "FAIL: missing diagnostic directory $directory" >&2; exit 1; }
+    done < <(sed -n 's/^  //p' "$WORK/output")
+    echo "PASS: export failure is reported and diagnostic files are retained"
 }
 
 check_team TESTTEAM42 TEAM_ID=TESTTEAM42

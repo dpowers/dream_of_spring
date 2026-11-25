@@ -10,6 +10,10 @@ import Security
 @objc protocol ClosedLidServiceProtocol {
     func setLease(seconds: Double, allowOnBattery: Bool, protectBattery: Bool, reserve: Double,
                   reply: @escaping (Bool, String) -> Void)
+    /// Sets the idle system-sleep timer (`pmset -b|-c sleep N`), which System
+    /// Settings no longer exposes on laptops. `source` is a `SleepTimerSource`
+    /// raw value; the helper validates both arguments.
+    func setSleepTimer(minutes: Int, source: Int, reply: @escaping (Bool, String) -> Void)
 }
 
 nonisolated enum ClosedLidService {

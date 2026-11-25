@@ -20,6 +20,7 @@ final class MenuContent: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === self.menu else { return }
         launchAtLogin.refresh()
+        enforcer.sleepTimers.refresh()
         menu.removeAllItems()
         populate(menu)
     }
@@ -46,16 +47,7 @@ final class MenuContent: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        if enforcer.blockers.isEmpty {
-            menu.addText("Nothing is blocking sleep")
-        } else {
-            menu.addText("Blocking sleep:")
-            for blocker in enforcer.blockers {
-                let label = "\(marker(for: enforcer.whitelist.policy(for: blocker.policyIdentifiers)))  \(blocker.displayName) — \(blocker.reason)"
-                addPolicyMenu(to: menu, identifier: blocker.identifier,
-                              alternateIdentifiers: blocker.alternateIdentifiers, label: label)
-            }
-        }
+        addBlockers(to: menu)
 
         menu.addItem(.separator())
         if enforcer.isPaused {
@@ -97,6 +89,7 @@ final class MenuContent: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         addBatteryMenu(to: menu)
+        addSleepTimersMenu(to: menu)
         menu.addAction("Launch at Login", checked: launchAtLogin.isEnabled) { [launchAtLogin] in
             launchAtLogin.toggle()
         }
@@ -114,6 +107,48 @@ final class MenuContent: NSObject, NSMenuDelegate {
         menu.addAction("Quit Dream Of Spring", keyEquivalent: "q") {
             NSApplication.shared.terminate(nil)
         }
+    }
+
+    /// Two groups instead of per-row icons: apps whose requests Dream Of Spring
+    /// is overriding, and apps a policy currently lets keep the Mac awake.
+    private func addBlockers(to menu: NSMenu) {
+        guard !enforcer.blockers.isEmpty else {
+            menu.addText("Nothing is blocking sleep")
+            return
+        }
+        let rows = enforcer.blockers.map { (blocker: $0, status: enforcer.status(for: $0)) }
+        let keepingAwake = rows.filter(\.status.isKeepingAwake)
+        let overridden = rows.filter { !$0.status.isKeepingAwake }
+        if !keepingAwake.isEmpty {
+            menu.addText("Keeping the Mac awake:")
+            for row in keepingAwake {
+                addBlockerRow(row.blocker, detail: keepingAwakeDetail(row.status), to: menu)
+            }
+        }
+        if !overridden.isEmpty {
+            menu.addText("Would block sleep without Dream Of Spring:")
+            for row in overridden {
+                addBlockerRow(row.blocker, detail: nil, to: menu)
+            }
+        }
+    }
+
+    private func addBlockerRow(_ blocker: Blocker, detail: String?, to menu: NSMenu) {
+        var label = "\(blocker.displayName) — \(blocker.reason)"
+        if let detail { label += " · \(detail)" }
+        addPolicyMenu(to: menu, identifier: blocker.identifier,
+                      alternateIdentifiers: blocker.alternateIdentifiers, label: label)
+    }
+
+    private func keepingAwakeDetail(_ status: BlockerStatus) -> String? {
+        guard case .keepingAwake(let remaining, let reason) = status else { return nil }
+        let prefix = switch reason {
+        case .alwaysAllowed, .allowedUpTo: ""
+        case .closedLid: "lid-closed permission, "
+        case .notEnforced: "not enforced, "
+        }
+        guard let remaining else { return prefix + "no limit" }
+        return prefix + "\(format(seconds: remaining)) left"
     }
 
     private func addBatteryMenu(to menu: NSMenu) {
@@ -145,6 +180,60 @@ final class MenuContent: NSObject, NSMenuDelegate {
                 battery.addText("Allowance shortened to protect your reserve")
             }
         }
+    }
+
+    /// macOS Settings shows only display sleep on laptops; the system-sleep
+    /// timer that Dream Of Spring enforces is otherwise reachable only via pmset.
+    private func addSleepTimersMenu(to menu: NSMenu) {
+        let timers = enforcer.sleepTimers
+        let submenu = menu.addSubmenu("Sleep Timers")
+        guard let settings = timers.settings else {
+            submenu.addText("Sleep timers unavailable")
+            return
+        }
+        let helper = enforcer.closedLidController
+        let canChange = !helper.needsApproval && !timers.isChanging
+        submenu.addText("Put the Mac to sleep after inactivity:")
+        for source in SleepTimerSource.allCases {
+            guard let current = settings.timers[source]?.systemMinutes else { continue }
+            let options = menuOptions(including: current)
+            let choices = submenu.addSubmenu("\(source.label): \(SleepTimerSettings.label(minutes: current))",
+                                             enabled: canChange)
+            for minutes in options {
+                choices.addAction(SleepTimerSettings.label(minutes: minutes), checked: minutes == current) { [enforcer] in
+                    enforcer.setSleepTimer(minutes: minutes, for: source)
+                }
+            }
+        }
+        let display = SleepTimerSource.allCases.compactMap { source -> String? in
+            guard let minutes = settings.timers[source]?.displayMinutes else { return nil }
+            return "\(SleepTimerSettings.label(minutes: minutes)) \(source.label.lowercased())"
+        }
+        if !display.isEmpty {
+            submenu.addItem(.separator())
+            submenu.addText("Display turns off after: \(display.joined(separator: ", "))")
+            let shorter = SleepTimerSource.allCases.contains { source in
+                guard let t = settings.timers[source], let d = t.displayMinutes else { return false }
+                return t.systemMinutes != 0 && (d == 0 || t.systemMinutes < d)
+            }
+            if shorter { submenu.addText("System sleep shorter than display sleep is unusual") }
+            submenu.addText("Change display sleep in System Settings → Lock Screen")
+        }
+        if helper.needsApproval {
+            submenu.addItem(.separator())
+            submenu.addText("Changing timers requires approval in System Settings → Login Items")
+        } else if let failure = timers.failure {
+            submenu.addItem(.separator())
+            submenu.addText("⚠ \(failure)")
+        }
+    }
+
+    private func menuOptions(including current: Int) -> [Int] {
+        var options = SleepTimerSettings.presetMinutes
+        if !options.contains(current) {
+            options.insert(current, at: options.firstIndex { $0 == 0 || $0 > current } ?? options.endIndex)
+        }
+        return options
     }
 
     private func addPolicyMenu(to menu: NSMenu, identifier: AppIdentifier,

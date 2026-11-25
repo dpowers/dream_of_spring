@@ -20,6 +20,7 @@ final class SleepEnforcer {
     let batteryPreferences: BatteryPreferences
     let closedLidPreferences: ClosedLidPreferences
     let closedLidController: ClosedLidController
+    let sleepTimers: SleepTimerController
     private(set) var lidState: LidState = .unavailable
     private(set) var closedLidLeaseSeconds: TimeInterval = 0
     private(set) var closedLidSuspended = false
@@ -72,6 +73,7 @@ final class SleepEnforcer {
         batteryPreferences: BatteryPreferences? = nil,
         closedLidPreferences: ClosedLidPreferences? = nil,
         closedLidController: ClosedLidController? = nil,
+        sleepTimers: SleepTimerController? = nil,
         startAutomatically: Bool = true,
         uptime: @MainActor @escaping () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000 },
         wallClock: @MainActor @escaping () -> Date = { Date() },
@@ -85,6 +87,7 @@ final class SleepEnforcer {
         self.batteryPreferences = batteryPreferences ?? BatteryPreferences()
         self.closedLidPreferences = closedLidPreferences ?? ClosedLidPreferences()
         self.closedLidController = closedLidController ?? ClosedLidController(disabled: !startAutomatically || EnforcementRuntime.isDisabled)
+        self.sleepTimers = sleepTimers ?? SleepTimerController(disabled: !startAutomatically || EnforcementRuntime.isDisabled)
         self.requestSleep = requestSleep
         self.readInputs = readInputs
         self.uptime = uptime
@@ -113,6 +116,16 @@ final class SleepEnforcer {
         blockers.filter { blocker in
             !blocker.policyIdentifiers.contains { whitelist.policy(for: $0) == .alwaysAllow }
         }
+    }
+
+    func status(for blocker: Blocker) -> BlockerStatus {
+        BlockerStatus.evaluate(
+            participatesInEnforcement: blocker.participatesInEnforcement,
+            hasPolicy: whitelist.policy(for: blocker.policyIdentifiers) != nil,
+            deadline: whitelist.sleepDeadline(for: blocker.policyIdentifiers, configuredTimeout: configuredTimeoutSeconds),
+            idleSeconds: idleSeconds,
+            closedLidProtected: closedLidLeaseSeconds > 0 && eligibleClosedLidBlockers.contains(blocker),
+            batteryRemainingSeconds: batteryPlan?.remainingSeconds)
     }
 
     var sleepDeadlineSeconds: TimeInterval? {
@@ -193,6 +206,11 @@ final class SleepEnforcer {
 
     func closedLidSettingsChanged() {
         tick()
+    }
+
+    /// Re-read pmset now rather than waiting up to 30 s to enforce the new timer.
+    func setSleepTimer(minutes: Int, for source: SleepTimerSource) {
+        sleepTimers.set(minutes: minutes, for: source) { [weak self] in self?.tick() }
     }
 
     func sleepNow() {

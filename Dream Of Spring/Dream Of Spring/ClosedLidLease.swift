@@ -33,7 +33,7 @@ nonisolated final class ClosedLidLease {
         }
         if !ownsOverride {
             guard !disabled else {
-                error = "Another utility has disabled system sleep"
+                error = "Closed-lid protection blocked by another keep-awake app (like Amphetamine) — quit it to use protection"
                 return false
             }
             guard journal(true) else {
@@ -48,7 +48,7 @@ nonisolated final class ClosedLidLease {
             }
         } else if !disabled {
             _ = release()
-            error = "The system sleep setting changed outside Dream Of Spring"
+            error = "Closed-lid protection interrupted by another keep-awake app (like Amphetamine) — quit it to resume"
             return false
         }
         expiresAt = now + min(seconds, ClosedLidService.maximumLeaseSeconds)

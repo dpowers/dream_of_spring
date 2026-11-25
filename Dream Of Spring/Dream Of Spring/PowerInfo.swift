@@ -117,6 +117,11 @@ enum PowerInfo {
         return nil
     }
 
+    /// Per-power-source timers from `pmset -g custom`; reading needs no privileges.
+    static func sleepTimerSettings() -> SleepTimerSettings? {
+        runPMSet(arguments: ["-g", "custom"]).flatMap(SleepTimerSettings.parse(custom:))
+    }
+
     private static func runPMSet(arguments: [String]) -> String? {
         let task = Process()
         task.executableURL = URL(filePath: "/usr/bin/pmset")

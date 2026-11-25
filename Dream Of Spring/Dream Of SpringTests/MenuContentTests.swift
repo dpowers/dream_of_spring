@@ -106,4 +106,24 @@ struct MenuContentTests {
         policies.performActionForItem(at: policies.indexOfItem(withTitle: "Allow keeping awake with lid closed"))
         #expect(fixture.enforcer.closedLidPreferences.permission(for: [app])?.onlyOnExternalPower == true)
     }
+
+    @Test func blockersAreGroupedByWhetherTheyKeepTheMacAwake() throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        fixture.sensors.inputs.settings = PowerSettings(timeoutSeconds: 300, source: "AC Power")
+        fixture.sensors.inputs.idleSeconds = 315
+        fixture.enforcer.whitelist.setPolicy(.allowUpTo(seconds: 900), for: .bundleID("video"))
+        fixture.sensors.inputs.blockers = [
+            Blocker(pid: 1, identifier: .bundleID("video"), displayName: "Video", reason: "Playback"),
+            Blocker(pid: 2, identifier: .bundleID("other"), displayName: "Other", reason: "Sync")
+        ]
+        fixture.enforcer.tick()
+        fixture.open()
+        let titles = fixture.content.menu.items.map(\.title)
+        let awake = try #require(titles.firstIndex(of: "Keeping the Mac awake:"))
+        let overridden = try #require(titles.firstIndex(of: "Would block sleep without Dream Of Spring:"))
+        #expect(titles[awake + 1] == "Video — Playback · 10 min left")
+        #expect(titles[overridden + 1] == "Other — Sync")
+        #expect(fixture.sensors.sleepCalls == 0)
+    }
 }
