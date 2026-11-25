@@ -33,6 +33,7 @@ nonisolated struct BatteryDrainEstimator {
     private struct Sample { let time: TimeInterval; let charge: Double }
     private var samples: [Sample] = []
     private(set) var percentagePointsPerHour: Double?
+    private static let fullWindowSeconds: TimeInterval = 540
 
     mutating func reset() { samples = []; percentagePointsPerHour = nil }
 
@@ -46,12 +47,15 @@ nonisolated struct BatteryDrainEstimator {
         }
         samples.append(Sample(time: now, charge: battery.percentage))
         samples.removeAll { now - $0.time > 600 }
-        // At least three minutes and one percentage point are needed to avoid
-        // treating rounded charge readings as a precise instantaneous rate.
+        // Charge is reported in whole points, so a one-point step says only
+        // that a boundary was crossed, not how long that point took. Trust a
+        // single point across (nearly) the whole rolling window; any shorter
+        // span of at least three minutes needs two.
         let rates = [samples.first, samples.last(where: { now - $0.time >= 180 })].compactMap { start -> Double? in
-            guard let start, now - start.time >= 180,
-                  start.charge - battery.percentage >= 1 else { return nil }
-            return (start.charge - battery.percentage) / (now - start.time) * 3600
+            guard let start, now - start.time >= 180 else { return nil }
+            let drop = start.charge - battery.percentage
+            guard drop >= (now - start.time >= Self.fullWindowSeconds ? 1 : 2) else { return nil }
+            return drop / (now - start.time) * 3600
         }
         percentagePointsPerHour = rates.max()
     }
@@ -72,10 +76,19 @@ nonisolated struct BatteryProtection {
     private var deadline: TimeInterval?
     private var deadlineReason: BatteryPlan.Reason = .reserve
     private var previousReserve: Double?
+    private var wakeFloor: TimeInterval?
     private(set) var plan: BatteryPlan?
     var drainPerHour: Double? { estimator.percentagePointsPerHour }
 
     mutating func resetDrainEstimate() { estimator.reset() }
+
+    /// Seconds a person gets to touch a key after a full wake.
+    static let wakeGraceSeconds: TimeInterval = 60
+
+    /// A full wake does not renew the allowance, but an allowance that ran
+    /// out while asleep must not put the Mac back to sleep before a person
+    /// opening the lid can touch a key. Floor the deadline instead.
+    mutating func noteWake(now: TimeInterval) { wakeFloor = now + Self.wakeGraceSeconds }
 
     mutating func update(battery: BatteryState?, idle: TimeInterval, inputCount: UInt64?,
                          now: TimeInterval, enabled: Bool, reserve: Double) {
@@ -105,7 +118,9 @@ nonisolated struct BatteryProtection {
             deadline = candidate
             deadlineReason = reason
         }
+        if let floor = wakeFloor, floor <= now { wakeFloor = nil }
         plan = BatteryPlan(idleSeconds: attention.idle,
-                           idleLimitSeconds: max(0, deadline! - lastInput), reason: deadlineReason)
+                           idleLimitSeconds: max(0, max(deadline!, wakeFloor ?? deadline!) - lastInput),
+                           reason: deadlineReason)
     }
 }

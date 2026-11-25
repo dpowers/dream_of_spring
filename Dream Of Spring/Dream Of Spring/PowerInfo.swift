@@ -95,12 +95,7 @@ enum PowerInfo {
     ]
 
     static func userIdleSeconds() -> TimeInterval {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
-        guard service != 0 else { return 0 }
-        defer { IOObjectRelease(service) }
-        guard let prop = IORegistryEntryCreateCFProperty(service, "HIDIdleTime" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue(),
-              let nanoseconds = (prop as? NSNumber)?.int64Value else { return 0 }
-        return TimeInterval(nanoseconds) / 1_000_000_000
+        PowerSafetyReadings.hidIdleSeconds() ?? 0
     }
 
     /// Hardware event state excludes ordinary session-posted synthetic input.
@@ -137,26 +132,17 @@ enum PowerInfo {
         runPMSet(arguments: ["-g", "custom"]).flatMap(SleepTimerSettings.parse(custom:))
     }
 
+    /// Not `Process.waitUntilExit()`: on the main thread that spins the run
+    /// loop, letting notifications and main-actor work (even a nested tick)
+    /// run mid-read, and it never times out.
     private static func runPMSet(arguments: [String]) -> String? {
-        let task = Process()
-        task.executableURL = URL(filePath: "/usr/bin/pmset")
-        task.arguments = arguments
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = Pipe()
-        do {
-            try task.run()
-        } catch {
-            logger.error("Failed to launch pmset: \(error.localizedDescription, privacy: .public)")
+        switch BoundedCommand.run("/usr/bin/pmset", arguments) {
+        case .success(let output):
+            return output
+        case .failure(let failure):
+            logger.error("pmset \(arguments.joined(separator: " "), privacy: .public) \(failure.description, privacy: .public)")
             return nil
         }
-        task.waitUntilExit()
-        if task.terminationStatus != 0 {
-            logger.error("pmset exited \(task.terminationStatus, privacy: .public)")
-            return nil
-        }
-        guard let data = try? pipe.fileHandleForReading.readToEnd() else { return nil }
-        return String(data: data, encoding: .utf8)
     }
 
     static func activeSettings() -> PowerSettings? {

@@ -80,6 +80,26 @@ struct BatteryBudgetTests {
         #expect(estimator.percentagePointsPerHour == nil)
     }
 
+    @Test func oneRoundedPointOverAShortSpanIsNotARate() {
+        var estimator = BatteryDrainEstimator()
+        for second in stride(from: 0, through: 510, by: 30) {
+            estimator.sample(battery(second < 180 ? 25 : 24), now: Double(second))
+        }
+        #expect(estimator.percentagePointsPerHour == nil)
+        estimator.sample(battery(24), now: 540)
+        #expect(abs((estimator.percentagePointsPerHour ?? 0) - 1.0 / 540 * 3600) < 0.001)
+        estimator.sample(battery(23), now: 570)
+        #expect(abs((estimator.percentagePointsPerHour ?? 0) - 2.0 / 570 * 3600) < 0.001)
+    }
+
+    @Test func helperFallsBackToRegistryIdleWithoutEventCounters() {
+        #expect(PowerSafetyReadings.daemonActivity(count: 0, eventIdle: 900, registryIdle: 3).count == nil)
+        #expect(PowerSafetyReadings.daemonActivity(count: 0, eventIdle: 900, registryIdle: 3).idle == 3)
+        #expect(PowerSafetyReadings.daemonActivity(count: 0, eventIdle: 900, registryIdle: nil).idle == 900)
+        let live = PowerSafetyReadings.daemonActivity(count: 7, eventIdle: 4, registryIdle: 3)
+        #expect(live.count == 7 && live.idle == 4)
+    }
+
     @Test func fastDrainShortensBudgetButSlowingDownCannotExtendIt() {
         var protection = BatteryProtection()
         for second in stride(from: 0, through: 180, by: 30) {
@@ -253,7 +273,12 @@ struct BatteryProtectionTests {
         enforcer.tick()
         #expect(sensors.sleepCalls == 0, "Do not actuate while asleep")
         enforcer.didWake()
-        #expect(sensors.sleepCalls == 1, "A background wake does not renew the allowance")
+        #expect(sensors.sleepCalls == 0, "Someone opening the lid gets time to touch a key")
+        #expect(enforcer.batteryPlan?.remainingSeconds == 60)
+        #expect(enforcer.batteryPlan?.shouldWarn == true)
+        sensors.uptime = 360
+        enforcer.tick()
+        #expect(sensors.sleepCalls == 1, "A wake without input does not renew the allowance")
         #expect(enforcer.batteryPlan?.remainingSeconds == 0)
     }
 

@@ -3,9 +3,9 @@ import Foundation
 nonisolated struct EnforcerSnapshot: Equatable, Sendable {
     var idleSeconds: TimeInterval
     var configuredTimeoutSeconds: TimeInterval
-    /// True when at least one blocker is active *given current idle time and
-    /// each blocker's whitelist policy* — i.e. its effective exemption window
-    /// has elapsed. Pre-computed by the enforcer so the decider stays pure.
+    /// True when a full sample found at least one blocker that takes part in
+    /// enforcement. Whitelist exemptions are applied separately, through
+    /// `enforcementDeadlineSeconds`.
     var hasActiveBlocker: Bool
     /// True when any process is capturing from a camera or microphone. A
     /// forced sleep would kill the live call/recording, and the processes

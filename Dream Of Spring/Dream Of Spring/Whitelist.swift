@@ -113,7 +113,7 @@ final class Whitelist {
         if let data = defaults.data(forKey: Self.policiesKey) {
             do {
                 let entries = try JSONDecoder().decode([WhitelistEntry].self, from: data)
-                policies = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.policy) })
+                policies = Dictionary(entries.map { ($0.id, $0.policy) }, uniquingKeysWith: { _, last in last })
                 return
             } catch {
                 Self.logger.error("Failed to decode whitelist: \(error.localizedDescription, privacy: .public)")
@@ -124,7 +124,7 @@ final class Whitelist {
         guard let data = defaults.data(forKey: Self.legacyKey) else { return }
         do {
             let legacy = try JSONDecoder().decode([AppIdentifier].self, from: data)
-            policies = Dictionary(uniqueKeysWithValues: legacy.map { ($0, .alwaysAllow) })
+            policies = Dictionary(legacy.map { ($0, WhitelistPolicy.alwaysAllow) }, uniquingKeysWith: { first, _ in first })
             save()
             defaults.removeObject(forKey: Self.legacyKey)
             Self.logger.info("Migrated \(legacy.count, privacy: .public) entries from legacy whitelist format")

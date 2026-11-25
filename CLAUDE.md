@@ -55,7 +55,8 @@ Public idle assertions do not override lid closure. The helper uses `pmset -a
 disablesleep` for a renewable lease of at most ten seconds. This is a system-wide
 override: **use Dream Of Spring's Sleep Now while protection is active**, since
 the ordinary Apple-menu sleep request can be suppressed. Screens can still sleep.
-The helper checks battery protection independently, drops protection on power
+The helper checks battery protection independently (falling back to
+`HIDIdleTime` if the event-state counters read zero in its session-less context), drops protection on power
 source changes and critical thermal state, and restores sleep on disconnect,
 expiry, termination and startup recovery. A durable root-owned journal under
 `/var/db/art.gardenplanner.Dream-Of-Spring` records ownership before setting the
@@ -97,8 +98,10 @@ battery power, the default maximum times without human input are:
 Changing the reserve shifts the first two bands; the 10% and 5% emergency bands
 stay fixed. The reserve is a best-effort target, not a guaranteed charge floor.
 Adaptive estimates retain at least ten minutes of utility after interaction.
-They require three minutes of charge samples and a drop of at least one point;
-the faster of the recent three-minute and rolling ten-minute rates wins. Charge
+They require three minutes of charge samples. Charge is reported in whole
+points, so a one-point drop counts only across nine minutes or more; a shorter
+span needs two. The faster of the recent three-minute and rolling ten-minute
+rates wins. Charge
 increases, external power, missing data, and gaps over 90 seconds reset the
 estimate. Within an unattended episode an estimate can only tighten a deadline.
 
@@ -113,7 +116,9 @@ Hardware input counts and idle durations come from Quartz's HID event-state
 table, without event taps or reading key contents. The battery timer uses a
 continuous monotonic clock that includes sleep. While the app runs, only a new
 hardware input count renews the allowance; background wake and HID idle-counter
-resets cannot do so. This distinguishes ordinary synthetic session events, not
+resets cannot do so. A full wake instead floors the deadline at sixty seconds
+(`BatteryProtection.noteWake`), so opening the lid on an expired allowance shows
+the warning rather than sleeping before a key can be pressed. This distinguishes ordinary synthetic session events, not
 malicious software impersonating hardware. Remote-control tools may report
 input differently. Normal enforcement still uses the existing HIDIdleTime.
 
@@ -233,7 +238,9 @@ Worst-case latency past the configured timeout: poll (≤30 s) + grace (15 s)
 ### IOKit surface used
 
 - **Configured system-sleep timer:** shells out to `pmset -g`, parses the
-  `sleep` line. `IOPMCopyPMPreferences` is **not** surfaced in the Swift
+  `sleep` line. App-side reads go through `BoundedCommand`, never
+  `Process.waitUntilExit()`, which spins the main run loop (re-entering
+  `tick()`) and has no timeout. `IOPMCopyPMPreferences` is **not** surfaced in the Swift
   IOKit module on macOS 26 — don't try to call it. (`pmset -g` already
   resolves to the active power source for us.)
 - **Real user idle time:** `IOHIDSystem` registry property `HIDIdleTime`

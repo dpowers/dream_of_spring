@@ -26,6 +26,10 @@ final class SleepEnforcer {
     private(set) var closedLidSuspended = false
     private var suspendedInputCount: UInt64?
     private var sleepRequestPending = false
+    /// Whether the automatic request being released for is still wanted.
+    /// Partial samples never evaluate normal enforcement, so their
+    /// `.doNothing` must not cancel a request a full sample made.
+    private var automaticSleepWanted = false
     private var isTerminating = false
     private(set) var blockers: [Blocker] = []
     /// True when any process is capturing from the camera / microphone —
@@ -251,7 +255,7 @@ final class SleepEnforcer {
             let currentInput = self.startAutomatically ? PowerSafetyReadings.humanActivity().count : self.latestInputs?.humanInputCount
             // The helper round trip is asynchronous. Input or a changed policy
             // during it may have cancelled an automatic sleep deadline.
-            if !manual && (currentInput != inputCount || self.lastDecision != .requestSleep) { return }
+            if !manual && (currentInput != inputCount || !self.automaticSleepWanted) { return }
             self.lastActuatorFailed = !self.requestSleep()
             self.lastSleepAttemptAt = self.wallClock()
             self.lastSleepAttemptUptime = self.uptime()
@@ -268,8 +272,10 @@ final class SleepEnforcer {
 
     func didWake() {
         isSleeping = false
-        // Preserve the interaction timestamp and deadline across every wake.
+        // Preserve the interaction timestamp and deadline across every wake;
+        // only a short floor lets a person reach the keyboard first.
         batteryProtection.resetDrainEstimate()
+        batteryProtection.noteWake(now: uptime())
         tick()
     }
 
@@ -340,6 +346,8 @@ final class SleepEnforcer {
             isClosedLidProtected: closedLidLeaseSeconds > 0
         )
         lastDecision = Decider.decide(snapshot)
+        if lastDecision == .requestSleep { automaticSleepWanted = true }
+        else if fullSample { automaticSleepWanted = false }
         if lastDecision == .requestSleep {
             Self.logger.info("Forcing sleep — idle=\(Int(self.idleSeconds), privacy: .public)s timeout=\(Int(self.configuredTimeoutSeconds), privacy: .public)s active-blockers=\(active.count, privacy: .public)")
             performSleepRequest()

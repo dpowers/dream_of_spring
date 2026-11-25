@@ -89,7 +89,9 @@ private final class Guardian {
 
     func permitted() -> Bool {
         let battery = PowerSafetyReadings.batteryState()
-        let human = PowerSafetyReadings.humanActivity()
+        let events = PowerSafetyReadings.humanActivity()
+        let human = PowerSafetyReadings.daemonActivity(count: events.count, eventIdle: events.idle,
+            registryIdle: PowerSafetyReadings.hidIdleSeconds())
         protection.update(battery: battery, idle: human.idle, inputCount: human.count,
             now: now, enabled: protectBattery, reserve: reserve)
         guard let battery, PowerSafetyReadings.lidIsClosed() != nil,

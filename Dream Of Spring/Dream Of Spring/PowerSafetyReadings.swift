@@ -29,6 +29,25 @@ nonisolated enum PowerSafetyReadings {
         return (count, idle)
     }
 
+    /// `HIDIdleTime` from the registry; readable without a window-server session.
+    static func hidIdleSeconds() -> TimeInterval? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        guard let prop = IORegistryEntryCreateCFProperty(service, "HIDIdleTime" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue(),
+              let nanoseconds = (prop as? NSNumber)?.int64Value else { return nil }
+        return TimeInterval(nanoseconds) / 1_000_000_000
+    }
+
+    /// The root helper has no GUI session, where the event-state table may
+    /// not be readable. An all-zero count means no counter at all, so fall
+    /// back to the registry idle time rather than a last-input time that can
+    /// never advance.
+    static func daemonActivity(count: UInt64, eventIdle: TimeInterval,
+                               registryIdle: TimeInterval?) -> (count: UInt64?, idle: TimeInterval) {
+        count == 0 ? (nil, registryIdle ?? eventIdle) : (count, eventIdle)
+    }
+
     static func batteryState() -> BatteryState? {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue(),
