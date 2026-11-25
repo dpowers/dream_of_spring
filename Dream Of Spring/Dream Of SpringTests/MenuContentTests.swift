@@ -124,4 +124,29 @@ struct MenuContentTests {
         #expect(titles[overridden + 1] == "Other — Sync")
         #expect(fixture.sensors.sleepCalls == 0)
     }
+
+    /// Regression: an exhausted battery allowance overrides allow-listed apps;
+    /// the group header must say why, or the allow list looks broken.
+    @Test func exhaustedBatteryAllowanceLabelsOverriddenApps() throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        fixture.enforcer.whitelist.setPolicy(.alwaysAllow, for: .bundleID("backup"))
+        fixture.sensors.inputs.blockers = [
+            Blocker(pid: 1, identifier: .bundleID("backup"), displayName: "Backup", reason: "NoSleep")
+        ]
+        // Below a 20% reserve on battery: at most 10 minutes without input.
+        fixture.sensors.inputs.battery = BatteryState(percentage: 16, isOnBatteryPower: true)
+        // The tracker measures from its first sample (at uptime 0), so advance
+        // the clock with no new input instead of only reporting idle time.
+        fixture.sensors.uptime = 700
+        fixture.sensors.inputs.humanIdleSeconds = 700
+        fixture.sensors.inputs.idleSeconds = 700
+        fixture.enforcer.tick()
+        #expect(fixture.enforcer.batteryPlan?.remainingSeconds == 0)
+        fixture.open()
+        let titles = fixture.content.menu.items.map(\.title)
+        let header = try #require(titles.firstIndex(of: "Overridden by the battery limit:"))
+        #expect(titles[header + 1] == "Backup — NoSleep")
+        #expect(!titles.contains("Would block sleep without Dream Of Spring:"))
+    }
 }

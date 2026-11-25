@@ -110,7 +110,10 @@ final class MenuContent: NSObject, NSMenuDelegate {
             }
         }
         if !overridden.isEmpty {
-            menu.addText("Would block sleep without Dream Of Spring:")
+            // An exhausted battery allowance overrides every policy; say so,
+            // or allowed apps listed here look like a broken allow list.
+            let batteryLimitReached = enforcer.batteryPlan?.remainingSeconds == 0
+            menu.addText(batteryLimitReached ? "Overridden by the battery limit:" : "Would block sleep without Dream Of Spring:")
             for row in overridden {
                 addBlockerRow(row.blocker, detail: nil, to: menu)
             }
