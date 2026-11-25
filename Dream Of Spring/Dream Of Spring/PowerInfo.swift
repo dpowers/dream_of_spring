@@ -64,7 +64,7 @@ enum PowerInfo {
     private static let assertionTypeKey = "AssertType"
     private static let assertionLevelKey = "AssertLevel"
     private static let assertionNameKey = "AssertName"
-    private static let onBehalfOfPIDKey = "AssertionOnBehalfOfPID"
+    nonisolated private static let onBehalfOfPIDKey = "AssertionOnBehalfOfPID"
 
     /// Daemons with no app bundle never get standalone rows. coreaudiod holds
     /// assertions for whichever app has audio open; that app is listed itself.
