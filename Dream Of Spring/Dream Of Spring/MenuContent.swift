@@ -309,7 +309,7 @@ final class MenuContent: NSObject, NSMenuDelegate {
             return "Status: dormant (sleep set to Never)"
         }
         if enforcer.meetingActivity == .active {
-            return "Status: meeting app or screen sharing detected — won't force sleep"
+            return "Status: call or screen sharing detected — won't force sleep"
         }
         if enforcer.meetingActivity == .unknown {
             return "Status: meeting activity unavailable — won't force sleep"

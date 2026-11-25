@@ -20,7 +20,7 @@ struct EnforcerReadings {
     static func read() -> Self {
         let settings = PowerInfo.activeSettings()
         let assertions = PowerInfo.assertionSnapshot()
-        let meeting = MeetingActivity.read(assertionReasons: assertions?.reasons)
+        let meeting = MeetingActivity.state(assertionReasons: assertions?.reasons)
         let camera = CaptureActivity.cameraInUse()
         let microphone = CaptureActivity.microphoneInUse()
         let battery = PowerInfo.batteryState()

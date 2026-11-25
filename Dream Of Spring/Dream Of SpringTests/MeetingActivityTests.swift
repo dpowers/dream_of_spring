@@ -7,18 +7,17 @@ import Testing
 @testable import Dream_Of_Spring
 
 struct MeetingActivityTests {
-    @Test(arguments: ["us.zoom.xos", "com.microsoft.teams2", "com.apple.FaceTime", "us.zoom.xos.helper"])
-    func dedicatedMeetingAppProtectsWithoutCapture(bundleID: String) {
-        #expect(MeetingActivity.state(runningBundleIDs: [bundleID], assertionReasons: []) == .active)
+    @Test func assertionNamedForACallProtectsWithoutCapture() {
+        #expect(MeetingActivity.state(assertionReasons: ["Zoom Meeting in progress"]) == .active)
     }
     @Test(arguments: ["WebRTC has active PeerConnections", "Screen Sharing", "Active call", "AVConference"])
     func daemonAndBrowserReasonsProtectWithoutGUIApp(reason: String) {
-        #expect(MeetingActivity.state(runningBundleIDs: [], assertionReasons: [reason]) == .active)
+        #expect(MeetingActivity.state(assertionReasons: [reason]) == .active)
     }
     @Test func ordinaryPlaybackDoesNotCountAsMeeting() {
-        #expect(MeetingActivity.state(runningBundleIDs: ["com.google.Chrome"], assertionReasons: ["Video Wake Lock"]) == .inactive)
-        #expect(MeetingActivity.state(runningBundleIDs: [], assertionReasons: nil) == .unknown)
-        #expect(MeetingActivity.state(runningBundleIDs: ["us.zoom.xos"], assertionReasons: nil) == .active)
+        #expect(MeetingActivity.state(assertionReasons: ["Video Wake Lock"]) == .inactive)
+        #expect(MeetingActivity.state(assertionReasons: []) == .inactive, "A meeting app that is merely running is not a meeting")
+        #expect(MeetingActivity.state(assertionReasons: nil) == .unknown)
     }
     @Test @MainActor func cameraOffMeetingVetoesUnrelatedBlockerUntilAfterMeetingEnds() {
         let sensors = TestSensors(EnforcerReadings(idleSeconds: 3600,

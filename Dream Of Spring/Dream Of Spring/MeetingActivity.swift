@@ -2,29 +2,19 @@
 //  MeetingActivity.swift
 //  Dream Of Spring
 //
-import AppKit
+import Foundation
 
-/// Capture is not a reliable meeting signal (phone audio, camera-off calls).
-/// Protect dedicated meeting apps for their entire lifetime. Browser meetings
-/// are protected by their WebRTC/screen-sharing assertions, including helpers
-/// and daemons that are intentionally absent from the user-facing blocker list.
+/// Capture is not a reliable meeting signal (phone audio, camera-off calls),
+/// so a call is also recognised by the name of any active power assertion,
+/// including those of browser helpers and conferencing daemons that are
+/// intentionally absent from the user-facing blocker list.
+///
+/// A meeting app that is merely running is not a meeting: Zoom and Teams
+/// idle in the background for days. To protect an app's own calls beyond
+/// these signals, give it an always-allow policy, which applies only while
+/// it holds an assertion.
 nonisolated enum MeetingActivity {
-    static let protectedBundleIDs: Set<String> = [
-        "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2",
-        "com.apple.facetime", "com.cisco.webexmeetingsapp",
-        "com.webex.meetingmanager", "com.cisco.webex"
-    ]
-
-    @MainActor static func read(assertionReasons: [String]?) -> ActivityState {
-        state(runningBundleIDs: Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)),
-              assertionReasons: assertionReasons)
-    }
-
-    static func state(runningBundleIDs: Set<String>, assertionReasons: [String]?) -> ActivityState {
-        if runningBundleIDs.contains(where: { id in
-            let id = id.lowercased()
-            return protectedBundleIDs.contains { id == $0 || id.hasPrefix($0 + ".") }
-        }) { return .active }
+    static func state(assertionReasons: [String]?) -> ActivityState {
         guard let assertionReasons else { return .unknown }
         let indicators = ["webrtc", "peerconnection", "screen sharing", "screensharing",
                           "screen capture", "screencapture", "video conferenc", "videoconferenc",

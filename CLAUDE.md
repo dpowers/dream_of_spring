@@ -222,7 +222,10 @@ that suppress that timer indefinitely. The app:
    **global veto** — call apps (FaceTime, Meet, Zoom) hold their keep-awake
    assertions via daemons (`avconferenced`, `coreaudiod`) that never appear
    in the blocker list, so the whitelist cannot protect a live call; the
-   capture veto does.
+   capture veto does. A power assertion named like a call
+   (WebRTC, screen sharing, VoIP; `MeetingActivity`) is a second veto for
+   camera-off calls. A meeting app merely running is deliberately not one;
+   an always-allow policy protects an app while it holds its own assertion.
 3. If the decider says `.requestSleep`, calls `SleepActuator.sleepNow()`,
    which is `IOPMFindPowerManagement` + `IOPMSleepSystem` — the same path
    `pmset sleepnow` uses. This sleep request overrides
