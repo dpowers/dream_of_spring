@@ -33,7 +33,6 @@ final class MenuContent: NSObject, NSMenuDelegate {
         }
         if enforcer.batteryPlan != nil {
             menu.addText("Preserving a \(Int(enforcer.batteryPreferences.reservePercentage))% reserve")
-            menu.addText("Human interaction resets the battery allowance")
         }
         menu.addText(statusLine)
         if !enforcer.closedLidPreferences.permissions.isEmpty {
@@ -92,11 +91,6 @@ final class MenuContent: NSObject, NSMenuDelegate {
         addSleepTimersMenu(to: menu)
         menu.addAction("Launch at Login", checked: launchAtLogin.isEnabled) { [launchAtLogin] in
             launchAtLogin.toggle()
-        }
-        menu.addAction("Open Energy Saver Settings…") {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.battery") {
-                NSWorkspace.shared.open(url)
-            }
         }
         menu.addItem(.separator())
         menu.addText("Version \(appVersion)")
